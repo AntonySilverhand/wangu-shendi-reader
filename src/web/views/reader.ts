@@ -439,6 +439,16 @@ export class ReaderView {
           this.cb.isBookmarked() ? '取消书签' : '加入书签',
         ),
         el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenDownload() }, '下载'),
+        el(
+          'button',
+          {
+            class: 'btn ghost small',
+            type: 'button',
+            id: 'reload-chapter',
+            onclick: () => this.cb.onRequestRetry(),
+          },
+          '重新获取本章',
+        ),
       ),
     );
   }

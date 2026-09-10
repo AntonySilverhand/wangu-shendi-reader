@@ -22,7 +22,7 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
     prevId: data.prevId,
     nextId: data.nextId,
     missingPages: data.missingPages ?? [],
-    complete: data.complete !== false,
+    complete: data.complete === true,
     v: CHAPTER_CACHE_VERSION,
   };
 }
