@@ -1,0 +1,20 @@
+{
+  // Cloudflare Workers 部署配置。
+  // 用法（用户提供 Cloudflare 账号/API Token 后）：
+  //   1) npx wrangler login 或设置 CLOUDFLARE_API_TOKEN
+  //   2) npm run deploy
+  // 部署后得到一个 *.workers.dev 链接，无需自购服务器。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wangu-shendi-reader",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

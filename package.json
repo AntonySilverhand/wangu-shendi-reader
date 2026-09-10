@@ -1,0 +1,24 @@
+{
+  "name": "wangu-shendi-reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "node --experimental-strip-types src/server/dev.ts",
+    "serve:prod": "node --experimental-strip-types src/server/dev.ts --prod",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260910.1",
+    "@types/node": "^22.15.0",
+    "playwright": "^1.63.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "3.2.7",
+    "wrangler": "4.131.0"
+  }
+}

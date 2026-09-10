@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-font="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>万古神帝 · 阅读</title>
+    <meta name="description" content="《万古神帝》干净、专注的个人阅读器" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f6f5f2" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <script>
+      // 在首屏绘制前应用主题与排版，避免闪白（读取失败时使用默认亮色）
+      (function () {
+        try {
+          var raw = localStorage.getItem('reader.settings.v1');
+          var s = raw ? JSON.parse(raw) : null;
+          var root = document.documentElement;
+          var theme = (s && s.theme) || 'light';
+          if (theme === 'auto') theme = 'light';
+          root.setAttribute('data-theme', theme);
+          root.setAttribute('data-font', (s && s.font) || 'system');
+          if (s) {
+            if (s.fontSize) root.style.setProperty('--reader-font-size', s.fontSize + 'px');
+            if (s.lineHeight) root.style.setProperty('--reader-line-height', String(s.lineHeight));
+            if (s.paraGap != null) root.style.setProperty('--reader-para-gap', s.paraGap + 'em');
+            if (s.margin != null) root.style.setProperty('--reader-margin', s.margin + 'px');
+            var fs = s.fontSize || 18;
+            if (s.maxWidth != null)
+              root.style.setProperty('--reader-max-width', s.maxWidth * fs + 'px');
+            if (s.paperTexture === false) root.setAttribute('data-paper-texture', 'off');
+            else root.setAttribute('data-paper-texture', 'on');
+          }
+          var colors = {
+            light: '#f6f5f2',
+            dark: '#161719',
+            black: '#000000',
+            eink: '#ededed',
+            paper: '#f5edda',
+          };
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta && colors[theme]) meta.setAttribute('content', colors[theme]);
+        } catch (e) {
+          /* 忽略：使用默认值 */
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles/app.css" />
+  </head>
+  <body>
+    <div id="app" class="app" data-view="boot" aria-busy="true">
+      <div class="boot" id="boot-screen" role="status" aria-live="polite">
+        <div class="boot-mark" aria-hidden="true">万</div>
+        <p class="boot-text">正在准备阅读器…</p>
+      </div>
+    </div>
+    <div id="overlay-root"></div>
+    <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <noscript>
+      <p style="padding: 24px; font-family: sans-serif">
+        本站需要 JavaScript 才能阅读。请在浏览器设置中启用后重试。
+      </p>
+    </noscript>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>
