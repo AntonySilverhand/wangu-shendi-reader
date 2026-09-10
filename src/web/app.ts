@@ -14,7 +14,7 @@ import { SettingsStore, applySettings } from './store/settings.ts';
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord, subscribeChapterUpdates } from './store/chapter.ts';
+import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, storageStats } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { BOOK, type TocEntry } from '../shared/source.ts';
@@ -135,6 +135,12 @@ export class App {
       // 初始化失败（如 IndexedDB 不可用）不应阻止基本阅读
       console.error('[reader] 初始化部分失败', err);
     }
+    void purgeOutdatedChapters().then((n) => {
+      if (n > 0) {
+        void this.refreshCachedIds();
+        showToast(`已清理 ${n} 条旧版缓存，将自动重新获取`);
+      }
+    });
     this.applyRoute();
     if (window.innerWidth >= 1100) this.tocView.open();
     document.getElementById('app')?.setAttribute('aria-busy', 'false');

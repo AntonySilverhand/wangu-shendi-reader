@@ -1,10 +1,31 @@
 /** 章节获取：IndexedDB 优先，未命中再走受限后端，并回写缓存。 */
 import type { ChapterResult } from '../../shared/source.ts';
-import { getChapter, putChapter, type ChapterRecord } from './db.ts';
+import { getChapter, openDb, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
 export const CHAPTER_CACHE_VERSION = 3;
+
+/** 版本变更时清掉旧缓存记录：旧版本可能存着“去重后缺段”的内容，绝不能继续复用 */
+export async function purgeOutdatedChapters(): Promise<number> {
+  const db = await openDb();
+  const all = await new Promise<ChapterRecord[]>((resolve, reject) => {
+    const tx = db.transaction('chapters', 'readonly');
+    const req = tx.objectStore('chapters').getAll();
+    req.onsuccess = () => resolve(req.result as ChapterRecord[]);
+    req.onerror = () => reject(req.error);
+  });
+  const stale = all.filter((r) => r.source !== 'local' && r.v !== CHAPTER_CACHE_VERSION);
+  if (stale.length === 0) return 0;
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('chapters', 'readwrite');
+    const store = tx.objectStore('chapters');
+    for (const r of stale) store.delete(r.key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  return stale.length;
+}
 
 type UpdateListener = (record: ChapterRecord) => void;
 const updateListeners = new Set<UpdateListener>();
