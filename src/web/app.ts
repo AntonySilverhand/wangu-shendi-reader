@@ -14,7 +14,7 @@ import { SettingsStore, applySettings } from './store/settings.ts';
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord } from './store/chapter.ts';
+import { loadChapterRecord, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, storageStats } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { BOOK, type TocEntry } from '../shared/source.ts';
@@ -117,6 +117,13 @@ export class App {
         idle(() => void this.toc.loadRange(1, 4, { background: true }));
       }
       this.download.subscribeDownload(() => void this.refreshCachedIds());
+      subscribeChapterUpdates((record) => {
+        if (record.bookId !== this.bookId || record.chapterId !== this.currentChapterId) return;
+        if (record.paragraphs.length <= this.reader.contentElement.childElementCount) return;
+        const pos = this.reader.lastKnownPosition;
+        void this.renderLoadedChapter(record.chapterId, record, pos);
+        showToast('已静默补齐本章后续内容');
+      });
       this.settings.subscribe(() => {
         this.reader.refreshLayout();
         this.updateWakeLock();
@@ -550,7 +557,6 @@ export class App {
       chapterTitle: entry?.displayTitle ?? record.title,
       chapterIndex: index >= 0 ? index : null,
     });
-    if (record.complete === false) this.scheduleCompletion(chapterId);
     this.schedulePrefetch(nextId);
     document.title = `${entry ? entry.displayTitle : record.title} · ${this.currentBookTitle()}`;
   }
@@ -662,28 +668,6 @@ export class App {
         .then(() => this.refreshCachedIds())
         .catch(() => undefined);
     }, 1600);
-  }
-
-  private completionTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** 缓存不完整时自动重试补齐，成功后原地替换内容并保持位置 */
-  private scheduleCompletion(chapterId: string): void {
-    if (this.completionTimer) clearTimeout(this.completionTimer);
-    this.completionTimer = setTimeout(async () => {
-      this.completionTimer = null;
-      if (document.hidden || navigator.onLine === false) return;
-      try {
-        const fresh = await loadChapterRecord(this.bookId, chapterId, { force: true });
-        if (this.currentChapterId !== chapterId) return;
-        if (fresh.paragraphs.length > (this.reader.contentElement.childElementCount || 0)) {
-          const pos = this.reader.lastKnownPosition;
-          this.renderLoadedChapter(chapterId, fresh, pos);
-          showToast('已补齐本章后续内容');
-        }
-      } catch {
-        /* 源站仍不可用，保留已读内容 */
-      }
-    }, 2000);
   }
 
   private cancelPrefetch(): void {

@@ -6,6 +6,38 @@ import { apiGet } from './remote.ts';
 const inFlight = new Map<string, Promise<ChapterRecord>>();
 export const CHAPTER_CACHE_VERSION = 2;
 
+type UpdateListener = (record: ChapterRecord) => void;
+const updateListeners = new Set<UpdateListener>();
+
+/** 后台补全成功后通知界面（先显示缓存、再静默更新，不阻塞阅读） */
+export function subscribeChapterUpdates(fn: UpdateListener): () => void {
+  updateListeners.add(fn);
+  return () => updateListeners.delete(fn);
+}
+
+function notifyUpdate(record: ChapterRecord): void {
+  for (const fn of updateListeners) fn(record);
+}
+
+async function refreshInBackground(bookId: string, chapterId: string, stale: ChapterRecord): Promise<void> {
+  const key = `${bookId}:${chapterId}`;
+  if (inFlight.has(key)) return;
+  try {
+    const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
+      retries: 0,
+      timeoutMs: 30_000,
+    });
+    const record = toRecord(bookId, data);
+    const better =
+      record.paragraphs.length > stale.paragraphs.length ||
+      (record.complete && !stale.complete);
+    await putChapter(record).catch(() => undefined);
+    if (better) notifyUpdate(record);
+  } catch {
+    /* 源站不可用：保留已缓存内容 */
+  }
+}
+
 function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
   const text = data.paragraphs.join('');
   const bytes = new TextEncoder().encode(text).length;
@@ -39,14 +71,16 @@ export async function loadChapterRecord(
   opts: LoadChapterOptions = {},
 ): Promise<ChapterRecord> {
   const key = `${bookId}:${chapterId}`;
-  let stale: ChapterRecord | null = null;
   if (!opts.force) {
     const cached = await getChapter(bookId, chapterId);
     if (cached) {
-      // 旧版或不完整缓存：尝试后台补全，网络不可用时仍返回已有内容
-      const healthy = cached.v === CHAPTER_CACHE_VERSION && cached.complete === true;
+      const healthy =
+        cached.source === 'local' ||
+        (cached.v === CHAPTER_CACHE_VERSION && cached.complete === true);
       if (healthy) return cached;
-      stale = cached;
+      // 关键：旧/不完整缓存先立即返回，后台静默补全（不再阻塞阅读）
+      void refreshInBackground(bookId, chapterId, cached);
+      return cached;
     }
   }
   const existing = inFlight.get(key);
@@ -66,11 +100,8 @@ export async function loadChapterRecord(
       } catch {
         /* 存储满时仍返回内容 */
       }
-      // 补全结果不完整时，保留内容更完整的旧记录
-      if (stale && record.paragraphs.length < stale.paragraphs.length) return stale;
       return record;
     } catch (err) {
-      if (stale) return stale;
       throw err;
     }
   })();
