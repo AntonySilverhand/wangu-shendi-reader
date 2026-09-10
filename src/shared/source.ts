@@ -293,14 +293,11 @@ export function parseChapterPage(
   if (paragraphs.length === 0) paragraphs = extractPlainParagraphs(html);
 
   const cleaned: string[] = [];
-  const seen = new Set<string>();
   for (const p of paragraphs) {
     const t = p.trim();
     if (!t || isNoise(t)) continue;
     if (t === title) continue;
-    // 同一页偶尔重复输出，去重但保留顺序
-    if (seen.has(t)) continue;
-    seen.add(t);
+    // 源站同一页可能真的重复同一句话（如连声惊呼），必须原样保留，不得去重
     cleaned.push(t);
   }
 
@@ -927,12 +924,15 @@ export async function fetchChapter(
     }
   }
 
+  // 只消除两种真实重复：整页重发、以及分页处“上页末段 = 下页首段”的重叠。其余重复句属于原文，必须保留。
   const paragraphs: string[] = [];
-  const seen = new Set<string>();
+  const pageSignatures = new Set<string>();
   for (const p of pages) {
+    const sig = p.paragraphs.join('\u0001');
+    if (p.paragraphs.length > 0 && pageSignatures.has(sig)) continue;
+    pageSignatures.add(sig);
     for (const para of p.paragraphs) {
-      if (seen.has(para)) continue;
-      seen.add(para);
+      if (paragraphs.length > 0 && paragraphs[paragraphs.length - 1] === para) continue;
       paragraphs.push(para);
     }
   }

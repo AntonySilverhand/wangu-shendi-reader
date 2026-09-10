@@ -55,7 +55,11 @@ describe('API 路由（同构 handler）', () => {
     expect(body.nextId).toBe('38621330');
     expect(body.charCount).toBeGreaterThan(2500);
     // 段落不重复
-    expect(new Set(body.paragraphs).size).toBe(body.paragraphs.length);
+    // 原文与源站都可能合法重复同一句话（如连声惊呼），因此禁止全局去重；
+    // 只要求不存在相邻重复（分页重叠会以“上页末段=下页首段”的形式出现）。
+    for (let i = 1; i < body.paragraphs.length; i++) {
+      expect(body.paragraphs[i]).not.toBe(body.paragraphs[i - 1]);
+    }
   });
 
   it('目录范围：返回分页分组', async () => {
