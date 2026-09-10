@@ -106,7 +106,7 @@ export class App {
     this.bindEvents();
     try {
       await this.toc.init();
-      await this.refreshCachedIds();
+      await this.refreshCachedIds(true);
       this.renderHomeView();
       if (this.toc.loadedPageCount === 0) {
         // 首页空闲时预取前几页目录，避免打开目录时空白
@@ -533,6 +533,13 @@ export class App {
     this.search.setContent(this.reader.contentElement);
     if (record.source === 'local') {
       this.reader.showBanner('本地导入内容');
+    } else if (record.missingPages && record.missingPages.length > 0) {
+      this.reader.showBanner('本章后续内容未取到（源站波动）', [
+        {
+          label: '继续加载',
+          onClick: () => void this.openChapter(chapterId, { force: true }),
+        },
+      ]);
     } else if (navigator.onLine === false) {
       this.reader.showBanner('离线阅读中（已缓存章节）');
     }
@@ -665,10 +672,29 @@ export class App {
     this.prefetchController = null;
   }
 
-  private async refreshCachedIds(): Promise<void> {
+  private cacheRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private async refreshCachedIds(immediate = false): Promise<void> {
+    if (immediate) {
+      if (this.cacheRefreshTimer) {
+        clearTimeout(this.cacheRefreshTimer);
+        this.cacheRefreshTimer = null;
+      }
+      await this.refreshCachedIdsNow();
+      return;
+    }
+    if (this.cacheRefreshTimer) return;
+    this.cacheRefreshTimer = setTimeout(() => {
+      this.cacheRefreshTimer = null;
+      void this.refreshCachedIdsNow();
+    }, 1200);
+  }
+
+  private async refreshCachedIdsNow(): Promise<void> {
     try {
-      this.cachedIds = await listChapterIds(this.bookId);
-      this.tocView.setCachedIds(this.cachedIds);
+      const ids = await listChapterIds(this.bookId);
+      this.cachedIds = ids;
+      this.tocView.setCachedIds(ids);
     } catch {
       /* 忽略 */
     }
@@ -690,7 +716,7 @@ export class App {
         return idx >= 0 ? idx : 0;
       },
       onLayoutChanged: () => this.reader.refreshLayout(),
-      onContentCleared: () => void this.refreshCachedIds(),
+      onContentCleared: () => void this.refreshCachedIds(true),
       onImportPersonal: (json, mode) => {
         const result = this.personal.importData(json, mode);
         if (result.settings) this.settings.replace({ ...this.settings.get(), ...result.settings });
@@ -810,7 +836,7 @@ export class App {
     oldPanel?.replaceWith(this.tocView.panel);
     this.download = this.createDownloadManager();
     await this.toc.init();
-    await this.refreshCachedIds();
+    await this.refreshCachedIds(true);
     this.renderHomeView();
     location.hash = '';
     this.showHome();

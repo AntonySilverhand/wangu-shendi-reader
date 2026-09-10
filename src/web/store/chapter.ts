@@ -20,6 +20,7 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
     bytes,
     prevId: data.prevId,
     nextId: data.nextId,
+    missingPages: data.missingPages ?? [],
   };
 }
 

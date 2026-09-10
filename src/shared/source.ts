@@ -26,7 +26,9 @@ export const MAX_CHAPTER_PAGES = 40;
 /** 单个 HTML 响应体上限 */
 export const MAX_HTML_BYTES = 4 * 1024 * 1024;
 export const REQUEST_TIMEOUT_MS = 10_000;
-export const MAX_RETRIES = 2;
+export const MAX_RETRIES = 3;
+/** 源站对突发并发很敏感（会直接重置连接），所有上游请求串行并保持最小间隔 */
+export const MIN_REQUEST_GAP_MS = 160;
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -61,6 +63,10 @@ export interface ChapterResult {
   nextId: string | null;
   pageCount: number;
   charCount: number;
+  /** 全部分页是否都取到（false 时客户端显示“继续加载”） */
+  complete: boolean;
+  /** 未取到的分页序号（0 起） */
+  missingPages: number[];
 }
 
 export interface RawChapterPage {
@@ -660,7 +666,7 @@ export async function fetchTocRange(
   const pages: number[] = [];
   for (let p = from; p <= to; p++) pages.push(p);
 
-  const fetched = await mapWithConcurrency(pages, 3, async (page) => {
+  const fetched = await mapWithConcurrency(pages, 2, async (page) => {
     try {
       const { html } = await fetchSourceHtml(buildTocUrl(page), opts);
       const classified = classifyTocItems(parseTocPageHtml(html, page), page);
@@ -718,6 +724,24 @@ export class SourceError extends Error {
   }
 }
 
+let upstreamChain: Promise<unknown> = Promise.resolve();
+let upstreamLastStart = 0;
+
+/** 串行化上游请求，避免源站因并发重置连接 */
+function enqueueUpstream<T>(task: () => Promise<T>): Promise<T> {
+  const run = upstreamChain.then(async () => {
+    const wait = upstreamLastStart + MIN_REQUEST_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    upstreamLastStart = Date.now();
+    return task();
+  });
+  upstreamChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export interface FetchTextResult {
   html: string;
   finalUrl: string;
@@ -734,7 +758,11 @@ export interface FetchOptions {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export async function fetchSourceHtml(
+export function fetchSourceHtml(url: string, opts: FetchOptions = {}): Promise<FetchTextResult> {
+  return enqueueUpstream(() => fetchSourceHtmlDirect(url, opts));
+}
+
+async function fetchSourceHtmlDirect(
   url: string,
   opts: FetchOptions = {},
 ): Promise<FetchTextResult> {
@@ -843,33 +871,24 @@ export async function fetchChapter(
   assertChapterId(id);
   const pages: RawChapterPage[] = [];
 
-  // 乐观预取第 2 页：多页章节可省一个往返；单页章节浪费一次快速失败请求
-  const optimistic = fetchSourceHtml(buildChapterUrl(id, 1), {
-    ...opts,
-    retries: 0,
-  })
-    .then((r) => r)
-    .catch(() => null);
-
   const firstRes = await fetchSourceHtml(buildChapterUrl(id, 0), opts);
   let current = parseChapterPage(firstRes.html, id, 0);
   pages.push(current);
 
+  const missingPages: number[] = [];
   let guard = 0;
   while (current.nextPageIndex !== null && current.nextPageIndex > current.pageIndex) {
     if (++guard > MAX_CHAPTER_PAGES) break;
     const pageIndex = current.nextPageIndex;
-    let html: string | null = null;
-    if (pageIndex === 1) {
-      const pre = await optimistic;
-      html = pre?.html ?? null;
-    }
-    if (html === null) {
+    try {
       const res = await fetchSourceHtml(buildChapterUrl(id, pageIndex), opts);
-      html = res.html;
+      current = parseChapterPage(res.html, id, pageIndex);
+      pages.push(current);
+    } catch {
+      // 后续分页失败时保留已取到的内容，客户端可稍后重试
+      missingPages.push(pageIndex);
+      break;
     }
-    current = parseChapterPage(html, id, pageIndex);
-    pages.push(current);
   }
 
   const paragraphs: string[] = [];
@@ -894,5 +913,7 @@ export async function fetchChapter(
     nextId: last.nextChapterId,
     pageCount: pages.length,
     charCount: paragraphs.reduce((n, p) => n + p.length, 0),
+    complete: missingPages.length === 0,
+    missingPages,
   };
 }

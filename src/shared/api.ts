@@ -31,6 +31,7 @@ export interface ApiContext {
 
 export const CACHE_TTL = {
   chapter: 30 * 24 * 3600,
+  chapterPartial: 120,
   toc: 6 * 3600,
   health: 0,
 } as const;
@@ -155,9 +156,21 @@ export async function handleApi(
             { status: 400 },
           );
         }
-        return await cachedJson(ctx, `chapter:${BOOK.id}:${id}`, CACHE_TTL.chapter, () =>
-          fetchChapter(id, { fetcher: ctx.fetcher }),
-        );
+        {
+          const key = `chapter:${BOOK.id}:${id}`;
+          const hit = await ctx.cache.get(key);
+          if (hit) {
+            return json(JSON.parse(hit.body), {
+              headers: { 'x-reader-cache': 'hit', 'cache-control': 'no-store' },
+            });
+          }
+          const data = await fetchChapter(id, { fetcher: ctx.fetcher });
+          const ttl = data.complete ? CACHE_TTL.chapter : CACHE_TTL.chapterPartial;
+          await ctx.cache.put(key, { status: 200, body: JSON.stringify(data) }, ttl);
+          return json(data, {
+            headers: { 'x-reader-cache': 'miss', 'cache-control': 'no-store' },
+          });
+        }
       }
 
       default:

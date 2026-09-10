@@ -105,8 +105,12 @@ export class ReaderView {
     document.getElementById('app')?.setAttribute('data-bars', 'hidden');
   }
 
+  private scrollIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
   private handleScroll(): void {
     this.onScrollDelta();
+    if (this.scrollIdleTimer) clearTimeout(this.scrollIdleTimer);
+    this.scrollIdleTimer = setTimeout(() => this.markScrollIdle(), 260);
     const pos = this.capturePosition();
     if (pos) {
       this.lastPosition = pos;
@@ -171,6 +175,13 @@ export class ReaderView {
     return null;
   }
 
+  /** 滚动结束后才做精确字符取样，滚动中只做段落定位 */
+  private offsetReadyAt = 0;
+
+  markScrollIdle(): void {
+    this.offsetReadyAt = Date.now() + 250;
+  }
+
   capturePosition(): { paragraph: number; offset: number } | null {
     const paragraphs = this.paragraphs();
     if (paragraphs.length === 0) return null;
@@ -190,9 +201,13 @@ export class ReaderView {
     }
     const target = paragraphs[found]!;
     let offset = 0;
-    const point = this.pointAt(anchorY);
-    if (point && target.contains(point.node)) {
-      offset = this.textOffset(target, point.node, point.offset);
+    if (Date.now() >= this.offsetReadyAt) {
+      const point = this.pointAt(anchorY);
+      if (point && target.contains(point.node)) {
+        offset = this.textOffset(target, point.node, point.offset);
+      }
+    } else if (this.lastPosition && this.lastPosition.paragraph === found) {
+      offset = this.lastPosition.offset;
     }
     return { paragraph: found, offset };
   }

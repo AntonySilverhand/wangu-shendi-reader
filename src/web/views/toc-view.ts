@@ -90,10 +90,17 @@ export class TocView {
     this.opts.store.subscribe(() => this.onStoreChange());
   }
 
+  private renderScheduled = false;
+
   private onStoreChange(): void {
-    this.updateFooter();
-    if (this.query) this.renderSearch();
-    else if (this.openState) this.renderList(true);
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.updateFooter();
+      if (this.query) this.renderSearch();
+      else if (this.openState) this.renderList(true);
+    });
   }
 
   setCachedIds(ids: Set<string>): void {
@@ -311,7 +318,6 @@ export class TocView {
     this.updateFooter('正在加载完整目录以便搜索…');
     await this.opts.store.loadAll((p) => {
       this.updateFooter(`正在搜索全部目录… ${p.loadedPages}/${p.totalPages} 页`);
-      if (this.query) this.renderSearch();
     });
     this.autoSearchLoading = false;
     this.updateFooter();

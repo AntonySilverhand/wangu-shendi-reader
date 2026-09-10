@@ -308,9 +308,7 @@ button {
   align-items: center;
   gap: 4px;
   padding-inline: max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-right));
-  background: color-mix(in srgb, var(--bg) 86%, transparent);
-  backdrop-filter: saturate(1.2) blur(12px);
-  -webkit-backdrop-filter: saturate(1.2) blur(12px);
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
   border-bottom: 1px solid var(--border);
   transform: translateY(0);
   transition: transform var(--motion);
@@ -376,9 +374,7 @@ button {
   gap: 2px;
   padding: 4px max(6px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
     max(6px, env(safe-area-inset-left));
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: saturate(1.2) blur(12px);
-  -webkit-backdrop-filter: saturate(1.2) blur(12px);
+  background: color-mix(in srgb, var(--bg) 97%, transparent);
   border-top: 1px solid var(--border);
   transition: transform var(--motion);
 }
@@ -453,7 +449,6 @@ button {
   letter-spacing: 0.012em;
   word-break: break-word;
   overflow-wrap: anywhere;
-  text-wrap: pretty;
 }
 .reader-content p {
   margin: 0 0 var(--reader-para-gap);

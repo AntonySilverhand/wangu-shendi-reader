@@ -84,7 +84,7 @@ describe('API 路由（同构 handler）', () => {
     expect(missing.status).toBe(404);
   });
 
-  it('上游失败返回可重试错误', async () => {
+  it('上游失败返回可重试错误', { timeout: 30_000 }, async () => {
     const failing = async () => {
       throw new Error('network down');
     };

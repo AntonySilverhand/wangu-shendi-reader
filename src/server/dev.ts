@@ -8,7 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { networkInterfaces } from 'node:os';
-import { MemoryApiCache } from '../shared/api.ts';
+import { FileApiCache } from './file-cache.ts';
 import { createApiMiddleware } from './middleware.ts';
 
 const args = process.argv.slice(2);
@@ -37,7 +37,7 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
-const cache = new MemoryApiCache();
+const cache = new FileApiCache(resolve('.cache/api'));
 const api = createApiMiddleware(cache);
 
 const server = createServer(async (req, res) => {

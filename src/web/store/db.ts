@@ -22,6 +22,8 @@ export interface ChapterRecord {
   /** 源站给出的相邻章节（目录未加载时的兜底） */
   prevId?: string | null;
   nextId?: string | null;
+  /** 源站分页未全部取到 */
+  missingPages?: number[];
 }
 
 export interface TocRecord {
