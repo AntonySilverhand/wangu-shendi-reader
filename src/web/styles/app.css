@@ -1329,3 +1329,32 @@ button {
 [hidden] {
   display: none !important;
 }
+
+/* 宽屏形态：右侧进度栏 + 主页仪表盘 */
+.side-rail { display: none; }
+@media (min-width: 1500px) {
+  .side-rail {
+    display: flex;
+    position: fixed;
+    right: 24px;
+    top: calc(var(--topbar-h) + 28px);
+    width: 190px;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow);
+    z-index: 30;
+  }
+  .side-rail .row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .side-rail .progress-track { margin: 0; }
+}
+@media (min-width: 1100px) {
+  .home-root { max-width: 1040px; grid-template-columns: 1fr 1fr; align-items: start; }
+  .home-head { grid-column: 1 / -1; }
+  .book-card { grid-column: 1; }
+  .quick-grid { grid-column: 2; }
+  .quick-grid { grid-template-columns: 1fr 1fr; }
+}

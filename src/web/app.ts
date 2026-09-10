@@ -53,6 +53,9 @@ export class App {
   private topbarTitleSub!: HTMLElement;
   private bookmarkBtn!: HTMLButtonElement;
   private netStatusEl!: HTMLElement;
+  private railEl!: HTMLElement;
+  private railProgress!: HTMLElement;
+  private railLabel!: HTMLElement;
   private bottombarPrev!: HTMLButtonElement;
   private bottombarNext!: HTMLButtonElement;
   private bottombarBookmark!: HTMLButtonElement;
@@ -133,6 +136,7 @@ export class App {
       console.error('[reader] 初始化部分失败', err);
     }
     this.applyRoute();
+    if (window.innerWidth >= 1100) this.tocView.open();
     document.getElementById('app')?.setAttribute('aria-busy', 'false');
   }
 
@@ -215,7 +219,25 @@ export class App {
     this.homeContainer = el('main', { class: 'home-root', id: 'home-root', hidden: true });
 
     this.appEl.appendChild(topbar);
+    this.railProgress = el('div', { class: 'progress-fill', style: { width: '0%' } });
+    this.railLabel = el('div', { class: 'loading-note', style: { textAlign: 'left' } });
+    this.railEl = el(
+      'aside',
+      { class: 'side-rail', 'aria-label': '阅读进度' },
+      el('strong', { text: '阅读进度', style: { fontSize: '13px' } }),
+      el('div', { class: 'progress-track' }, this.railProgress),
+      this.railLabel,
+      el(
+        'div',
+        { class: 'row-actions' },
+        el('button', { class: 'btn small', type: 'button', onclick: () => this.goRelative(-1) }, '上一章'),
+        el('button', { class: 'btn small primary', type: 'button', onclick: () => this.goRelative(1) }, '下一章'),
+      ),
+      el('button', { class: 'btn small ghost', type: 'button', onclick: () => this.toggleBookmark() }, '书签'),
+      el('button', { class: 'btn small ghost', type: 'button', onclick: () => this.tocView.toggle() }, '目录'),
+    );
     this.appEl.appendChild(this.reader.root);
+    this.appEl.appendChild(this.railEl);
     this.appEl.appendChild(this.tocView.panel);
     this.appEl.appendChild(bottombar);
     this.appEl.appendChild(this.homeContainer);
@@ -574,10 +596,21 @@ export class App {
     } else {
       this.topbarTitleSub.textContent = '干净阅读';
     }
+    this.updateRail();
     const bookmarked = this.isCurrentBookmarked();
     this.bookmarkBtn.setAttribute('aria-label', bookmarked ? '取消书签' : '添加书签');
     this.bookmarkBtn.style.color = bookmarked ? 'var(--accent)' : '';
     this.bottombarBookmark.style.color = bookmarked ? 'var(--accent)' : '';
+  }
+
+  private updateRail(): void {
+    const index = this.currentChapterId ? this.toc.indexOfChapter(this.currentChapterId) : -1;
+    const total = Math.max(1, this.toc.mainCount);
+    const pct = index >= 0 ? Math.min(100, Math.round(((index + 1) / total) * 100)) : 0;
+    this.railProgress.style.width = `${pct}%`;
+    this.railLabel.textContent = this.currentEntry
+      ? `${this.currentEntry.displayTitle.slice(0, 18)} · 全书 ${pct}%`
+      : '尚未开始阅读';
   }
 
   private updateBottombar(prevId: string | null, nextId: string | null): void {

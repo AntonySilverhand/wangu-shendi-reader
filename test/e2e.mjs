@@ -7,6 +7,8 @@ import { chromium, devices } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const BASE = process.argv[2] ?? 'http://localhost:8787';
+const PART = process.argv[3] ?? 'all';
+const runPart = (n) => PART === 'all' || PART === String(n);
 const SHOT_DIR = new URL('../artifacts/', import.meta.url).pathname;
 mkdirSync(SHOT_DIR, { recursive: true });
 
@@ -95,6 +97,7 @@ async function main() {
     console.log(`  [pageerror] ${String(err).slice(0, 300)}`);
   });
 
+  if (runPart(1)) {
   console.log('\n[1] 首屏与基本阅读');
   await openFirstChapter(page);
   const paraCount = await page.locator('#chapter-content p').count();
@@ -223,7 +226,7 @@ async function main() {
   console.log('\n[6] 书签与进度持久化');
   await showBars(page);
   await page.click('[data-testid=bookmark-btn]');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(900);
   const bookmarksAfterAdd = await page.evaluate(() => {
     const data = JSON.parse(localStorage.getItem('reader.personal.v1') ?? '{}');
     const books = Object.values(data.books ?? {});
@@ -255,6 +258,8 @@ async function main() {
   check('离线指示显示', offlineState.net === true, JSON.stringify(offlineState));
   await context.setOffline(false);
 
+  }
+  if (runPart(2)) {
   console.log('\n[8] 多视口布局与横向溢出');
   for (const vp of VIEWPORTS) {
     const ctx = await newContext(browser, vp);
@@ -403,6 +408,7 @@ async function main() {
   check('本地书可阅读', Boolean(localTitle && localTitle.includes('起点')), localTitle ?? '');
   await txtCtx.close();
 
+  }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
@@ -414,7 +420,7 @@ async function main() {
     failures,
     results,
   };
-  writeFileSync(`${SHOT_DIR}e2e-results.json`, JSON.stringify(summary, null, 2));
+  writeFileSync(`${SHOT_DIR}e2e-results-${PART}.json`, JSON.stringify(summary, null, 2));
   console.log(`\n完成：${results.length - failures}/${results.length} 通过，截图在 artifacts/`);
   process.exit(failures > 0 ? 1 : 0);
 }
