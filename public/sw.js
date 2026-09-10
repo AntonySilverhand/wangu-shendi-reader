@@ -1,7 +1,7 @@
 /* 应用外壳离线缓存。正文缓存由应用层（IndexedDB）管理，不走这里。 */
 const BUILD_ID = /*__BUILD_ID__*/"dev";
 const SHELL_CACHE = `reader-shell-${BUILD_ID}`;
-const RUNTIME_CACHE = 'reader-runtime';
+const RUNTIME_CACHE = `reader-runtime-${BUILD_ID}`;
 const PRECACHE = /*__PRECACHE__*/[];
 
 self.addEventListener('install', (event) => {
@@ -21,7 +21,11 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key.startsWith('reader-shell-') && key !== SHELL_CACHE)
+            .filter(
+              (key) =>
+                (key.startsWith('reader-shell-') && key !== SHELL_CACHE) ||
+                (key.startsWith('reader-runtime-') && key !== RUNTIME_CACHE),
+            )
             .map((key) => caches.delete(key)),
         ),
       )

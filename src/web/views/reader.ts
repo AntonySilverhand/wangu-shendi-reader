@@ -365,6 +365,9 @@ export class ReaderView {
     this.titleEl.textContent = chapterLabel(entry, record.title) || record.title;
     clear(this.metaEl);
     this.metaEl.appendChild(el('span', { text: `${record.paragraphs.length} 段` }));
+    if (record.source !== 'local' && (record.missingPages?.length ?? 0) === 0) {
+      this.metaEl.appendChild(el('span', { text: '源站分页已合并' }));
+    }
     this.metaEl.appendChild(el('span', { text: `${record.charCount.toLocaleString('zh-CN')} 字` }));
     if (record.source === 'local') this.metaEl.appendChild(el('span', { text: '本地导入' }));
 
