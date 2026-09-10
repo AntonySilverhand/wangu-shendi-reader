@@ -157,7 +157,7 @@ export async function handleApi(
           );
         }
         {
-          const key = `chapter:v2:${BOOK.id}:${id}`;
+          const key = `chapter:v3:${BOOK.id}:${id}`;
           const hit = await ctx.cache.get(key);
           if (hit) {
             return json(JSON.parse(hit.body), {

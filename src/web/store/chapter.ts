@@ -4,7 +4,7 @@ import { getChapter, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
-export const CHAPTER_CACHE_VERSION = 2;
+export const CHAPTER_CACHE_VERSION = 3;
 
 type UpdateListener = (record: ChapterRecord) => void;
 const updateListeners = new Set<UpdateListener>();
