@@ -112,6 +112,16 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 
 ---
 
+## Android APK（独立运行，无需后端）
+
+```bash
+npm run build:android          # 构建 Android 目标 Web 资源（dist-android/）
+bash android/build.sh 0.0.2    # 打包 APK（需要 JDK 21 + Android SDK：aapt/zipalign/apksigner/d8）
+# 产物：artifacts/wangu-reader-v0.0.2.apk
+```
+
+APK 内置 Web 应用与一个仅监听 `127.0.0.1` 的本地资源服务器；书源请求由原生层代理获取（绕开浏览器跨域限制），正文解析、缓存、阅读界面与网页版共用同一套代码。已下载章节可离线阅读，无需电脑或服务器。
+
 ## 部署到 Cloudflare（无需自购服务器）
 
 `wrangler.jsonc` 已就绪：静态资源走 Workers Static Assets，`/api/*` 走 Worker，书源缓存用 Cache API。

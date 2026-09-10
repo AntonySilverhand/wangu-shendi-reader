@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:android": "VITE_TARGET=android vite build --outDir ../../dist-android --emptyOutDir",
     "serve": "node --experimental-strip-types src/server/dev.ts",
     "serve:prod": "node --experimental-strip-types src/server/dev.ts --prod",
     "test": "vitest run",
