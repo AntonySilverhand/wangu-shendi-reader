@@ -44,7 +44,7 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 
 1. **Node 直接运行 TS**（`--experimental-strip-types`）：`src/shared`、`src/server` 中**禁止**参数属性（`constructor(private x: T)`）、enum、namespace。只用可擦除语法。
 2. **Android 的 d8 对 JDK21 编译的内部类会崩溃**：`android/java` 下**禁止匿名类/内部类/嵌套类/lambda**，只写顶层类，兄弟类之间通过构造参数传引用。
-3. **源站对并发敏感**：所有上游请求必须走 `source.ts` 的 `enqueueUpstream`（串行 + 160ms 间隔）。不要新增并发抓取。
+3. **上游请求必须走 `source.ts` 的队列**（并发上限 2 + 最小间隔 160ms + 优先级）。章节等用户请求用默认 `high`，目录/预取传 `highPriority: false`。禁止绕过队列直接 fetch，也禁止改回全局串行——全局串行会造成队头阻塞（源站一慢，全线卡住）。
 4. **缓存键改动必须升版本**（如 `chapter:v2:`）。服务端磁盘缓存（`.cache/api`）与客户端 IndexedDB 都可能残留旧数据；改缓存语义时同步升 `CHAPTER_CACHE_VERSION`，并让旧记录失效后**先显示缓存再后台补全**（不可阻塞阅读）。
 5. **`complete` 语义**：只有 `ChapterResult.complete === true` 才算完整；客户端把 `undefined` 当不完整处理（触发补全）。章节内容永远"宁多勿少"——补全结果更短时不要覆盖。
 6. **Service Worker 缓存必须按构建号隔离**（`reader-shell-<build>` / `reader-runtime-<build>`），激活时清理旧版本；否则旧 JS 会持续提供，造成"修了还在复现"。

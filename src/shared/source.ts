@@ -668,7 +668,7 @@ export async function fetchTocRange(
 
   const fetched = await mapWithConcurrency(pages, 2, async (page) => {
     try {
-      const { html } = await fetchSourceHtml(buildTocUrl(page), opts);
+      const { html } = await fetchSourceHtml(buildTocUrl(page), { ...opts, highPriority: false });
       const classified = classifyTocItems(parseTocPageHtml(html, page), page);
       return {
         page,
@@ -724,22 +724,56 @@ export class SourceError extends Error {
   }
 }
 
-let upstreamChain: Promise<unknown> = Promise.resolve();
-let upstreamLastStart = 0;
+interface UpstreamJob {
+  run: () => void;
+  high: boolean;
+}
 
-/** 串行化上游请求，避免源站因并发重置连接 */
-function enqueueUpstream<T>(task: () => Promise<T>): Promise<T> {
-  const run = upstreamChain.then(async () => {
-    const wait = upstreamLastStart + MIN_REQUEST_GAP_MS - Date.now();
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+const upstreamJobs: UpstreamJob[] = [];
+let upstreamActive = 0;
+let upstreamLastStart = 0;
+let upstreamTimer: ReturnType<typeof setTimeout> | null = null;
+/** 并发上限（避免队头阻塞）与请求最小间隔（避免触发源站重置）同时生效 */
+const UPSTREAM_CONCURRENCY = 2;
+
+function pumpUpstream(): void {
+  if (upstreamTimer) {
+    clearTimeout(upstreamTimer);
+    upstreamTimer = null;
+  }
+  while (upstreamActive < UPSTREAM_CONCURRENCY && upstreamJobs.length > 0) {
+    const now = Date.now();
+    const wait = upstreamLastStart + MIN_REQUEST_GAP_MS - now;
+    if (wait > 0) {
+      upstreamTimer = setTimeout(pumpUpstream, wait);
+      return;
+    }
+    // 章节请求优先；目录/预取让路，避免阅读被目录加载阻塞
+    let index = upstreamJobs.findIndex((j) => j.high);
+    if (index < 0) index = 0;
+    const job = upstreamJobs.splice(index, 1)[0]!;
+    upstreamActive++;
     upstreamLastStart = Date.now();
-    return task();
+    job.run();
+  }
+}
+
+/** 排队 + 限速 + 优先级；prefetch/toc 等后台请求应传 high=false */
+export function enqueueUpstream<T>(task: () => Promise<T>, high = true): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    upstreamJobs.push({
+      high,
+      run: () => {
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            upstreamActive--;
+            pumpUpstream();
+          });
+      },
+    });
+    pumpUpstream();
   });
-  upstreamChain = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
 }
 
 export interface FetchTextResult {
@@ -749,6 +783,8 @@ export interface FetchTextResult {
 }
 
 export interface FetchOptions {
+  /** 后台请求（目录、预取）传 false，让章节请求优先 */
+  highPriority?: boolean;
   fetcher?: FetchLike;
   timeoutMs?: number;
   retries?: number;
@@ -759,7 +795,7 @@ export interface FetchOptions {
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export function fetchSourceHtml(url: string, opts: FetchOptions = {}): Promise<FetchTextResult> {
-  return enqueueUpstream(() => fetchSourceHtmlDirect(url, opts));
+  return enqueueUpstream(() => fetchSourceHtmlDirect(url, opts), opts.highPriority !== false);
 }
 
 async function fetchSourceHtmlDirect(
