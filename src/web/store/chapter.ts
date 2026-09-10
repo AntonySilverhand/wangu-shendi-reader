@@ -4,6 +4,7 @@ import { getChapter, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
+export const CHAPTER_CACHE_VERSION = 2;
 
 function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
   const text = data.paragraphs.join('');
@@ -21,6 +22,8 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
     prevId: data.prevId,
     nextId: data.nextId,
     missingPages: data.missingPages ?? [],
+    complete: data.complete !== false,
+    v: CHAPTER_CACHE_VERSION,
   };
 }
 
@@ -36,27 +39,40 @@ export async function loadChapterRecord(
   opts: LoadChapterOptions = {},
 ): Promise<ChapterRecord> {
   const key = `${bookId}:${chapterId}`;
+  let stale: ChapterRecord | null = null;
   if (!opts.force) {
     const cached = await getChapter(bookId, chapterId);
-    if (cached) return cached;
+    if (cached) {
+      // 旧版或不完整缓存：尝试后台补全，网络不可用时仍返回已有内容
+      const healthy = cached.v === CHAPTER_CACHE_VERSION && cached.complete === true;
+      if (healthy) return cached;
+      stale = cached;
+    }
   }
   const existing = inFlight.get(key);
   if (existing) return existing;
 
   const task = (async () => {
     opts.onNetworkStart?.();
-    const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
-      signal: opts.signal,
-      retries: 1,
-      timeoutMs: 45_000,
-    });
-    const record = toRecord(bookId, data);
     try {
-      await putChapter(record);
-    } catch {
-      /* 存储满时仍返回内容 */
+      const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
+        signal: opts.signal,
+        retries: 1,
+        timeoutMs: 45_000,
+      });
+      const record = toRecord(bookId, data);
+      try {
+        await putChapter(record);
+      } catch {
+        /* 存储满时仍返回内容 */
+      }
+      // 补全结果不完整时，保留内容更完整的旧记录
+      if (stale && record.paragraphs.length < stale.paragraphs.length) return stale;
+      return record;
+    } catch (err) {
+      if (stale) return stale;
+      throw err;
     }
-    return record;
   })();
 
   inFlight.set(key, task);

@@ -24,6 +24,10 @@ export interface ChapterRecord {
   nextId?: string | null;
   /** 源站分页未全部取到 */
   missingPages?: number[];
+  /** 是否已取到全部分页（旧记录缺省为 undefined，会被视为需要补全） */
+  complete?: boolean;
+  /** 缓存记录版本 */
+  v?: number;
 }
 
 export interface TocRecord {
