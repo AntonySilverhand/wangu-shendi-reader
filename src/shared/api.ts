@@ -27,6 +27,8 @@ export interface ApiContext {
   cache: ApiCache;
   fetcher?: FetchLike;
   now?: () => number;
+  /** 测试注入：覆盖书源重试次数（默认走 source.ts 的 MAX_RETRIES） */
+  retries?: number;
 }
 
 export const CACHE_TTL = {
@@ -157,14 +159,16 @@ export async function handleApi(
           );
         }
         {
-          const key = `chapter:v3:${BOOK.id}:${id}`;
+          // v4：分页发现改为 frontier + 终章证据；旧版本可能把“未发现分页”
+          // 的残缺一章缓存成 complete:true 30 天，必须绕过。
+          const key = `chapter:v4:${BOOK.id}:${id}`;
           const hit = await ctx.cache.get(key);
           if (hit) {
             return json(JSON.parse(hit.body), {
               headers: { 'x-reader-cache': 'hit', 'cache-control': 'no-store' },
             });
           }
-          const data = await fetchChapter(id, { fetcher: ctx.fetcher });
+          const data = await fetchChapter(id, { fetcher: ctx.fetcher, retries: ctx.retries });
           const ttl = data.complete ? CACHE_TTL.chapter : CACHE_TTL.chapterPartial;
           await ctx.cache.put(key, { status: 200, body: JSON.stringify(data) }, ttl);
           return json(data, {

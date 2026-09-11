@@ -76,7 +76,12 @@ export interface RawChapterPage {
   paragraphs: string[];
   prevChapterId: string | null;
   nextChapterId: string | null;
+  /** 本页已知的最小“下一分页”序号（兼容字段；发现逻辑见 sameChapterPages） */
   nextPageIndex: number | null;
+  /** 本页链接中出现的同章分页序号（不含本页，升序去重） */
+  sameChapterPages: number[];
+  /** 页面自报的分页序号（lastread.set 参数 / 标题“第N页”，0 起）；无法识别为 null */
+  declaredPageIndex: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,34 +253,100 @@ function cleanTitle(raw: string): string {
     .trim();
 }
 
-interface NavLink {
+export interface NavLink {
   href: string;
   text: string;
 }
 
-function extractNavLinks(html: string): NavLink[] {
+/**
+ * 稳健的链接发现：扫描所有 <a> 标签，不做任何“导航文字”白名单过滤。
+ * 支持单/双引号、属性任意顺序、未加引号的 href、实体编码。
+ * 语义（分页/上一章/下一章）由调用方按 URL 中的 chapter id 判定，
+ * 绝不依赖按钮文字——源站“下一章”按钮经常指向同章下一页。
+ */
+export function extractAnchors(html: string): NavLink[] {
   const links: NavLink[] = [];
-  const re = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
+    const attrs = m[1]!;
+    const hm = attrs.match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    if (!hm) continue;
+    const href = decodeEntities(hm[1] ?? hm[2] ?? hm[3] ?? '');
+    if (!href) continue;
     const text = stripTags(m[2]!).replace(/\s+/g, '');
-    if (/^(上一章|下一章|上一页|下一页|章节目录)$/.test(text)) {
-      links.push({ href: m[1]!, text });
-    }
+    links.push({ href, text });
   }
   return links;
 }
 
-interface ParsedChapterLink {
+/** 去掉 script/style/注释后再扫描链接，避免把 JS 字符串误认成 <a> */
+function extractContentAnchors(html: string): NavLink[] {
+  const cleaned = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+  return extractAnchors(cleaned);
+}
+
+export interface ParsedChapterLink {
   id: string;
   pageIndex: number;
 }
 
+/**
+ * 解析任意指向本书章节页面的链接：相对/绝对/协议相对、单双引号、query/hash。
+ * 只接受 wanshuge.org / www.wanshuge.org 上的 book 36780 路径，
+ * 其它一律返回 null（安全边界不变，后端仍不是任意 URL 代理）。
+ */
 export function parseChapterLink(href: string): ParsedChapterLink | null {
-  let m = href.match(new RegExp(`^/book/${BOOK.id}_(\\d+)\\.html$`));
+  let h = (href ?? '').trim();
+  if (!h) return null;
+  const hash = h.indexOf('#');
+  if (hash >= 0) h = h.slice(0, hash);
+  if (/^https?:\/\//i.test(h) || h.startsWith('//')) {
+    try {
+      const u = new URL(/^https?:\/\//i.test(h) ? h : `https:${h}`);
+      if (!ALLOWED_HOSTS.has(u.hostname)) return null;
+      h = u.pathname;
+    } catch {
+      return null;
+    }
+  }
+  const q = h.indexOf('?');
+  if (q >= 0) h = h.slice(0, q);
+
+  let m = h.match(new RegExp(`^/book/${BOOK.id}_(\\d+)\\.html$`));
   if (m) return { id: m[1]!, pageIndex: 0 };
-  m = href.match(new RegExp(`^/book/${BOOK.id}/(\\d+)(?:_(\\d+))?\\.html$`));
-  if (m) return { id: m[1]!, pageIndex: m[2] ? parseInt(m[2], 10) : 0 };
+  m = h.match(new RegExp(`^/book/${BOOK.id}/(\\d+)(?:_(\\d+))?\\.html$`));
+  if (m) {
+    const digits = m[1]!;
+    // /book/36780/{n}.html 同时是“目录第 n+1 页”（n≤43，一两位）与旧版章节首页形式。
+    // 章节 id 在本源站均为 7 位以上；按位数区分，避免把目录页误认成章节。
+    if (!m[2] && digits.length < 6) return null;
+    return { id: digits, pageIndex: m[2] ? parseInt(m[2], 10) : 0 };
+  }
+  return null;
+}
+
+/**
+ * 页面自报的分页序号：优先 lastread.set('36780','<id>',...,'<pageIndex>',...)，
+ * 其次标题“（第N页）”。源站对超出末尾的分页会回环到第一页，
+ * 该字段可与请求的 pageIndex 比对识别回环。
+ */
+export function extractDeclaredPageIndex(html: string): number | null {
+  const lr = html.match(/lastread\.set\([^)]*\)/i);
+  if (lr) {
+    const args = lr[0].match(/'([^']*)'/g);
+    if (args && args.length >= 5) {
+      const n = parseInt(args[4]!.slice(1, -1), 10);
+      if (Number.isInteger(n)) return n;
+    }
+  }
+  const h2 = html.match(/chapter-title[^>]*>([\s\S]*?)<\/h2>/i);
+  const mark = h2?.[1] ?? html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? '';
+  const pm = mark.match(/第(\d+)页/);
+  if (pm) return parseInt(pm[1]!, 10) - 1;
   return null;
 }
 
@@ -283,6 +354,11 @@ export function parseChapterLink(href: string): ParsedChapterLink | null {
 /* Chapter parsing                                                     */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 解析单个物理页。链接语义完全由 URL 中的 chapter id 判定：
+ *  - 同 id = 同章分页（无论按钮文字是“上一章/下一章/上一页/下一页”）
+ *  - 不同 id 且 pageIndex 0 = 真正相邻章节（文字仅用于区分方向，不用于认定语义）
+ */
 export function parseChapterPage(
   html: string,
   expectedId: string,
@@ -301,20 +377,35 @@ export function parseChapterPage(
     cleaned.push(t);
   }
 
-  let prevChapterId: string | null = null;
-  let nextChapterId: string | null = null;
-  let nextPageIndex: number | null = null;
+  const sameChapterPages = new Set<number>();
+  const prevCandidates: string[] = [];
+  const nextCandidates: string[] = [];
+  let otherFirstId: string | null = null;
 
-  for (const link of extractNavLinks(html)) {
+  for (const link of extractContentAnchors(html)) {
     const parsed = parseChapterLink(link.href);
     if (!parsed) continue;
     if (parsed.id === expectedId) {
-      if (parsed.pageIndex === pageIndex + 1) nextPageIndex = parsed.pageIndex;
+      // 同 chapter id = 同章分页，文字说什么都不改变这一点
+      if (parsed.pageIndex !== pageIndex) sameChapterPages.add(parsed.pageIndex);
       continue;
     }
-    if (link.text === '上一章' && prevChapterId === null) prevChapterId = parsed.id;
-    if (link.text === '下一章' && nextChapterId === null) nextChapterId = parsed.id;
+    // 不同 chapter id：只收 chapter 首页（pageIndex 0）作为相邻章节候选
+    if (parsed.pageIndex !== 0) continue;
+    if (/^(上一章|上一页)$/.test(link.text)) {
+      prevCandidates.push(parsed.id);
+    } else if (/^(下一章|下一页)$/.test(link.text)) {
+      nextCandidates.push(parsed.id);
+    } else if (otherFirstId === null) {
+      otherFirstId = parsed.id;
+    }
   }
+
+  const sortedSame = [...sameChapterPages].sort((a, b) => a - b);
+  const nextPageIndex = sortedSame.find((n) => n > pageIndex) ?? null;
+  const prevChapterId = prevCandidates[0] ?? null;
+  const nextChapterId =
+    nextCandidates[0] ?? (prevCandidates.length === 0 && nextCandidates.length === 0 ? otherFirstId : null);
 
   return {
     id: expectedId,
@@ -324,6 +415,8 @@ export function parseChapterPage(
     prevChapterId,
     nextChapterId,
     nextPageIndex,
+    sameChapterPages: sortedSame,
+    declaredPageIndex: extractDeclaredPageIndex(html),
   };
 }
 
@@ -897,37 +990,182 @@ export async function fetchTocPage(
   return { page, totalPages, entries: mergeTocPages([raw]) };
 }
 
+/* ------------------------------------------------------------------ */
+/* Chapter fetching（frontier + 终章证据）                              */
+/* ------------------------------------------------------------------ */
+
+/** 单页抓取结果分类：404 与回环都是“该分页不存在”的积极证据 */
+type PageFetchOutcome =
+  | { kind: 'ok'; page: RawChapterPage }
+  | { kind: 'not_found' }
+  | { kind: 'failed'; error: SourceError };
+
+/**
+ * 抓取章节全部分页：
+ *  - 从第 0 页出发，把每页发现的同 chapter id 分页链接加入 frontier，
+ *    全部抓完后按 pageIndex 排序合并；发现顺序不再依赖单条“下一页”链，
+ *    也不依赖按钮文字（源站“下一章”经常指向同章下一页）。
+ *  - 源站对超出末尾的分页不回 404，而是回环到第一页（内容重复、
+ *    lastread/标题自报页码回退）；这类响应不当作真实分页，并作为终章证据。
+ *  - complete 只可能来自积极证据：末页存在指向不同 chapter id 的真正下一章，
+ *    或探针确认不存在更大的同章分页（回环/404）。绝不因
+ *    “没发现分页”或“missingPages 为空”而置 true。
+ */
 export async function fetchChapter(
   id: string,
   opts: FetchOptions = {},
 ): Promise<ChapterResult> {
   assertChapterId(id);
-  const pages: RawChapterPage[] = [];
+  const fetched = new Map<number, RawChapterPage>();
+  const failed = new Set<number>();
+  const absent = new Set<number>(); // 确认不存在/回环的分页序号
+  const seen = new Set<number>();
+  const discovered = new Set<number>();
+  const signatures = new Set<string>();
+  const queue: number[] = [0];
+  let probePending = false;
+  let terminal = false;
+  let firstError: SourceError | null = null;
 
-  const firstRes = await fetchSourceHtml(buildChapterUrl(id, 0), opts);
-  let current = parseChapterPage(firstRes.html, id, 0);
-  pages.push(current);
-
-  const missingPages: number[] = [];
-  let guard = 0;
-  while (current.nextPageIndex !== null && current.nextPageIndex > current.pageIndex) {
-    if (++guard > MAX_CHAPTER_PAGES) break;
-    const pageIndex = current.nextPageIndex;
+  const fetchOne = async (pageIndex: number): Promise<PageFetchOutcome> => {
     try {
       const res = await fetchSourceHtml(buildChapterUrl(id, pageIndex), opts);
-      current = parseChapterPage(res.html, id, pageIndex);
-      pages.push(current);
-    } catch {
-      // 后续分页失败时保留已取到的内容，客户端可稍后重试
-      missingPages.push(pageIndex);
-      break;
+      return { kind: 'ok', page: parseChapterPage(res.html, id, pageIndex) };
+    } catch (err) {
+      const sourceErr =
+        err instanceof SourceError
+          ? err
+          : new SourceError(err instanceof Error ? err.message : String(err), 'network', true);
+      if (sourceErr.code === 'http' && sourceErr.status === 404) {
+        return { kind: 'not_found' };
+      }
+      return { kind: 'failed', error: sourceErr };
+    }
+  };
+
+  const isLoopback = (page: RawChapterPage): boolean => {
+    if (page.paragraphs.length === 0) return false;
+    const sig = page.paragraphs.join('\u0001');
+    return (
+      signatures.has(sig) ||
+      (page.declaredPageIndex !== null && page.declaredPageIndex < page.pageIndex)
+    );
+  };
+
+  const absorb = (page: RawChapterPage): void => {
+    if (page.paragraphs.length === 0) {
+      // 有页面但提取不到正文：按失败处理，稍后可重试
+      failed.add(page.pageIndex);
+      return;
+    }
+    signatures.add(page.paragraphs.join('\u0001'));
+    fetched.set(page.pageIndex, page);
+    for (const pi of page.sameChapterPages) {
+      discovered.add(pi);
+      if (pi >= 0 && pi < MAX_CHAPTER_PAGES && !seen.has(pi) && !queue.includes(pi)) {
+        queue.push(pi);
+      }
+    }
+  };
+
+  while (fetched.size < MAX_CHAPTER_PAGES) {
+    if (queue.length === 0) {
+      const maxIdx = fetched.size > 0 ? Math.max(...fetched.keys()) : -1;
+      if (maxIdx < 0) break; // 第 0 页都没拿到：由 firstError 抛出或按失败结果返回
+      const last = fetched.get(maxIdx)!;
+
+      // 终章证据 A：末页存在指向不同 chapter id 的真正下一章。
+      // 例外：maxIdx === 0 时仍要探针——源站 CDN 曾以旧模板提供第一页
+      //（“下一章”直连下一章 id，而 _1 分页实际已存在），只有探针能区分。
+      if (last.nextChapterId !== null && maxIdx > 0) {
+        terminal = true;
+        break;
+      }
+
+      // 终章证据 B：已知不存在 maxIdx+1（回环或 404）也是积极证据
+      if (absent.has(maxIdx + 1)) {
+        terminal = true;
+        break;
+      }
+
+      // 终章证据 C：有限探针——每章最多探一次“下一页”。
+      // 跳过已尝试失败的序号（fetchOne 内部已重试）；失败保持 unknown。
+      if (probePending) {
+        terminal = false;
+        break;
+      }
+      let probeIdx = maxIdx + 1;
+      while (
+        probeIdx < MAX_CHAPTER_PAGES &&
+        (seen.has(probeIdx) || failed.has(probeIdx) || absent.has(probeIdx))
+      ) {
+        probeIdx++;
+      }
+      if (probeIdx >= MAX_CHAPTER_PAGES) {
+        terminal = false;
+        break;
+      }
+      probePending = true;
+      queue.push(probeIdx);
+      continue;
+    }
+
+    queue.sort((a, b) => a - b);
+    const pageIndex = queue.shift()!;
+    if (seen.has(pageIndex) || pageIndex < 0 || pageIndex >= MAX_CHAPTER_PAGES) continue;
+    seen.add(pageIndex);
+    const outcome = await fetchOne(pageIndex);
+    if (outcome.kind === 'ok') {
+      if (isLoopback(outcome.page)) {
+        // 回环：源站把不存在的分页重发成更早的页面。该分页不存在（积极证据），
+        // 但页面里的链接仍可能指向未知分页，继续吸收链接。
+        absent.add(pageIndex);
+        for (const pi of outcome.page.sameChapterPages) {
+          discovered.add(pi);
+          if (pi >= 0 && pi < MAX_CHAPTER_PAGES && !seen.has(pi) && !queue.includes(pi)) {
+            queue.push(pi);
+          }
+        }
+        continue;
+      }
+      absorb(outcome.page);
+    } else if (outcome.kind === 'not_found') {
+      absent.add(pageIndex);
+    } else {
+      failed.add(pageIndex);
+      if (firstError === null) firstError = outcome.error;
     }
   }
 
-  // 只消除两种真实重复：整页重发、以及分页处“上页末段 = 下页首段”的重叠。其余重复句属于原文，必须保留。
+  // 所有已知分页都取到了但没有终章证据 → 不得标 complete
+  if (fetched.size >= MAX_CHAPTER_PAGES) terminal = false;
+  const missing = new Set<number>(failed);
+  for (const pi of discovered) {
+    if (!fetched.has(pi) && !absent.has(pi) && pi < MAX_CHAPTER_PAGES) missing.add(pi);
+  }
+
+  if (fetched.size === 0) {
+    if (firstError) throw firstError;
+    // 首页有响应但没有任何正文/分页信息：按不完整返回，等待后续重验
+    return {
+      id,
+      title: `章节 ${id}`,
+      paragraphs: [],
+      prevId: null,
+      nextId: null,
+      pageCount: 0,
+      charCount: 0,
+      complete: false,
+      missingPages: [...missing].sort((a, b) => a - b),
+    };
+  }
+
+  // 只消除两种真实重复：整页重发、以及分页处“上页末段 = 下页首段”的重叠。
+  // 其余重复句属于原文，必须保留。回环页在吸收阶段已排除，不会进入合并。
+  const sorted = [...fetched.values()].sort((a, b) => a.pageIndex - b.pageIndex);
   const paragraphs: string[] = [];
   const pageSignatures = new Set<string>();
-  for (const p of pages) {
+  for (const p of sorted) {
     const sig = p.paragraphs.join('\u0001');
     if (p.paragraphs.length > 0 && pageSignatures.has(sig)) continue;
     pageSignatures.add(sig);
@@ -937,19 +1175,19 @@ export async function fetchChapter(
     }
   }
 
-  const first = pages[0]!;
-  const last = pages[pages.length - 1]!;
-  const title = pages.map((p) => p.title).find((t) => !/第\d+页/.test(t)) ?? first.title;
+  const first = sorted[0]!;
+  const last = sorted[sorted.length - 1]!;
+  const title = sorted.map((p) => p.title).find((t) => !/第\d+页/.test(t)) ?? first.title;
 
   return {
     id,
     title,
     paragraphs,
     prevId: first.prevChapterId,
-    nextId: last.nextChapterId,
-    pageCount: pages.length,
+    nextId: last.nextChapterId ?? first.nextChapterId,
+    pageCount: sorted.length,
     charCount: paragraphs.reduce((n, p) => n + p.length, 0),
-    complete: missingPages.length === 0,
-    missingPages,
+    complete: terminal && missing.size === 0,
+    missingPages: [...missing].sort((a, b) => a - b),
   };
 }

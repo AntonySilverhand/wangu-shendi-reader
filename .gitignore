@@ -7,3 +7,5 @@ dist-android/
 android/assets/
 android/build/
 android/debug.keystore
+
+.cache/

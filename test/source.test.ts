@@ -16,12 +16,31 @@ import {
   tocPath,
   chapterPath,
   buildChapterUrl,
+  fetchChapter,
+  extractAnchors,
+  extractDeclaredPageIndex,
   type TocItemRaw,
 } from '../src/shared/source.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = (name: string) => join(here, 'fixtures', name);
 const html = (name: string) => readFileSync(fixtures(name), 'utf8');
+
+/** 真实 fixture 驱动抓取：routes 按去掉 host 的 pathname 匹配 */
+function fixtureFetcher(routes: Record<string, string>, fail?: string[]) {
+  return async (input: string): Promise<Response> => {
+    const url = new URL(input);
+    const path = url.pathname;
+    if (fail?.includes(path)) throw new Error('network down');
+    const body = routes[path];
+    return new Response(body ?? '', {
+      status: body !== undefined ? 200 : 404,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+  };
+}
+
+const noRetry = { retries: 0, sleep: () => Promise.resolve() } as const;
 
 describe('URL 构建受限', () => {
   it('目录页 URL', () => {
@@ -49,6 +68,57 @@ describe('URL 构建受限', () => {
       pageIndex: 1,
     });
     expect(parseChapterLink('https://evil.com/x')).toBeNull();
+  });
+  it('链接解析：绝对 URL / www / http / 协议相对 / query / hash', () => {
+    expect(parseChapterLink('https://wanshuge.org/book/36780_38621328.html')).toEqual({
+      id: '38621328',
+      pageIndex: 0,
+    });
+    expect(parseChapterLink('https://www.wanshuge.org/book/36780_38621328.html?x=1#top')).toEqual({
+      id: '38621328',
+      pageIndex: 0,
+    });
+    expect(parseChapterLink('http://wanshuge.org/book/36780/38621328_1.html?from=pc')).toEqual({
+      id: '38621328',
+      pageIndex: 1,
+    });
+    expect(parseChapterLink('//wanshuge.org/book/36780/38621328_2.html')).toEqual({
+      id: '38621328',
+      pageIndex: 2,
+    });
+    // 其它域名/非本书路径一律拒绝
+    expect(parseChapterLink('https://wanshuge.org/book/99999_38621328.html')).toBeNull();
+    expect(parseChapterLink('https://example.com/book/36780_38621328.html')).toBeNull();
+    expect(parseChapterLink('javascript:void(0)')).toBeNull();
+    expect(parseChapterLink('')).toBeNull();
+    // 目录分页页（/book/36780/1.html）不能被误认成章节
+    expect(parseChapterLink('/book/36780/1.html')).toBeNull();
+    expect(parseChapterLink('/book/36780/43.html')).toBeNull();
+  });
+  it('链接发现：单双引号、属性乱序、未加引号 href、script 干扰都能处理', () => {
+    const raw = [
+      `<a href="/book/36780_38621328.html">上一章</a>`,
+      `<a class='x' href='/book/36780/38621328_1.html'>下一章</a>`,
+      `<a  rel="nofollow"   href=/book/36780/38621328_2.html >下一页</a>`,
+      `<a href="https://www.wanshuge.org/book/36780_38621328.html">绝对</a>`,
+      `<script>var s="<a href='/book/36780/8924760.html'>干扰</a>";</script>`,
+    ].join('');
+    const hrefs = extractAnchors(raw).map((l) => l.href);
+    expect(hrefs).toContain('/book/36780_38621328.html');
+    expect(hrefs).toContain('/book/36780/38621328_1.html');
+    expect(hrefs).toContain('/book/36780/38621328_2.html');
+    expect(hrefs).toContain('https://www.wanshuge.org/book/36780_38621328.html');
+    // 页面级解析会先剥离 script，JS 字符串里的“链接”不应被当成导航
+    const page = parseChapterPage(raw, '38621328', 0);
+    expect(page.sameChapterPages).toEqual([1, 2]);
+    expect(page.nextChapterId).toBeNull();
+  });
+  it('页面自报分页序号（lastread/标题）', () => {
+    expect(extractDeclaredPageIndex(html('chapter-38621571-p1.html'))).toBe(0);
+    expect(extractDeclaredPageIndex(html('chapter-38621571-p2.html'))).toBe(1);
+    expect(extractDeclaredPageIndex(html('chapter-38621571-p3.html'))).toBe(2);
+    // 回环页：URL 是 _3，但页面自报第 1 页（lastread 序号 0）
+    expect(extractDeclaredPageIndex(html('chapter-38621571-loopback.html'))).toBe(0);
   });
 });
 
@@ -94,6 +164,175 @@ describe('章节正文解析（真实 fixture）', () => {
   it('最早的第 1 章可以解析', () => {
     const page = parseChapterPage(html('chapter-8924760-p1.html'), '8924760', 0);
     expect(page.paragraphs.length).toBeGreaterThan(5);
+  });
+});
+
+describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）', () => {
+  it('第 1 物理页：同章下一页链接在“下一章”按钮上（文字不可信，URL 才是语义）', () => {
+    const page = parseChapterPage(html('chapter-38621571-p1.html'), '38621571', 0);
+    expect(page.title).toBe('第2871章 原来如此');
+    expect(page.paragraphs.length).toBeGreaterThan(20);
+    expect(page.paragraphs[0]).toContain('张若尘');
+    expect(page.sameChapterPages).toEqual([1]);
+    expect(page.nextPageIndex).toBe(1);
+    expect(page.prevChapterId).toBe('38621566');
+    expect(page.nextChapterId).toBeNull(); // “下一章”按钮指向同章 _1，不是下一章
+    expect(page.declaredPageIndex).toBe(0);
+  });
+  it('第 2 物理页：上一/下一都指向同章分页', () => {
+    const page = parseChapterPage(html('chapter-38621571-p2.html'), '38621571', 1);
+    expect(page.sameChapterPages).toEqual([0, 2]);
+    expect(page.nextPageIndex).toBe(2);
+    expect(page.prevChapterId).toBeNull();
+    expect(page.nextChapterId).toBeNull();
+    expect(page.declaredPageIndex).toBe(1);
+    expect(page.paragraphs.length).toBeGreaterThan(20);
+  });
+  it('第 3 物理页（末页）：真正下一章 38621574 在这里', () => {
+    const page = parseChapterPage(html('chapter-38621571-p3.html'), '38621571', 2);
+    expect(page.sameChapterPages).toEqual([1]);
+    expect(page.nextPageIndex).toBeNull();
+    expect(page.prevChapterId).toBeNull();
+    expect(page.nextChapterId).toBe('38621574');
+    expect(page.declaredPageIndex).toBe(2);
+    expect(page.paragraphs.at(-1)).toBe('难怪荒天会亲自出手，夺走天尊宝纱。');
+  });
+  it('回环页：URL 是 _3，但内容/自报页码都是第 1 页', () => {
+    const loop = parseChapterPage(html('chapter-38621571-loopback.html'), '38621571', 3);
+    const first = parseChapterPage(html('chapter-38621571-p1.html'), '38621571', 0);
+    expect(loop.declaredPageIndex).toBe(0); // 自报第 1 页，与请求的 3 不符
+    expect(loop.paragraphs).toEqual(first.paragraphs);
+  });
+});
+
+describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
+  const routes2871: Record<string, string> = {
+    '/book/36780_38621571.html': html('chapter-38621571-p1.html'),
+    '/book/36780/38621571_1.html': html('chapter-38621571-p2.html'),
+    '/book/36780/38621571_2.html': html('chapter-38621571-p3.html'),
+    '/book/36780/38621571_3.html': html('chapter-38621571-loopback.html'),
+  };
+
+  it('2871：三个物理页全部抓到，末页正文存在，complete 来自终章证据', async () => {
+    const requested: string[] = [];
+    const fetcher = async (input: string): Promise<Response> => {
+      const path = new URL(input).pathname;
+      requested.push(path);
+      const body = routes2871[path];
+      return new Response(body ?? '', {
+        status: body !== undefined ? 200 : 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    };
+    const r = await fetchChapter('38621571', { fetcher, ...noRetry });
+    expect(r.pageCount).toBe(3);
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
+    expect(r.prevId).toBe('38621566');
+    expect(r.nextId).toBe('38621574');
+    expect(r.paragraphs.length).toBeGreaterThan(80);
+    // 第三物理页的真实正文必须出现在最终结果里（bug 的核心断言）
+    expect(r.paragraphs).toContain('难怪荒天会亲自出手，夺走天尊宝纱。');
+    expect(r.paragraphs).toContain('“放肆！”');
+    // 需要抓的只有 0/1/2；末页已有真正下一章，不应再探 _3
+    expect(requested).toEqual([
+      '/book/36780_38621571.html',
+      '/book/36780/38621571_1.html',
+      '/book/36780/38621571_2.html',
+    ]);
+  });
+
+  it('_1 抓取失败：保留已取内容、complete=false、missingPages 记录已知缺口', async () => {
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher(routes2871, ['/book/36780/38621571_1.html']),
+      ...noRetry,
+    });
+    expect(r.complete).toBe(false);
+    expect(r.missingPages).toEqual([1]);
+    expect(r.pageCount).toBe(2);
+    // 已成功取到的 0、2 页正文仍在，且末页正文没有丢
+    expect(r.paragraphs).toContain('难怪荒天会亲自出手，夺走天尊宝纱。');
+    expect(r.nextId).toBe('38621574');
+  });
+
+  it('_2 抓取失败：同样不标 complete，继续拿其它已发现分页', async () => {
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher(routes2871, ['/book/36780/38621571_2.html']),
+      ...noRetry,
+    });
+    expect(r.complete).toBe(false);
+    expect(r.missingPages).toEqual([2]);
+    expect(r.pageCount).toBe(2);
+  });
+
+  it('回环证据：只有第 0 页且 _1 回环到第 1 页内容 → 单页章节能确认完整', async () => {
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher({
+        '/book/36780_38621571.html': html('chapter-38621571-p1.html'),
+        '/book/36780/38621571_1.html': html('chapter-38621571-loopback.html'),
+      }),
+      ...noRetry,
+    });
+    expect(r.pageCount).toBe(1);
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
+  });
+
+  it('回环证据：_1 返回 404 → 同样视为“不存在更大分页”的积极证据', async () => {
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher({ '/book/36780_38621571.html': html('chapter-38621571-p1.html') }),
+      ...noRetry,
+    });
+    expect(r.pageCount).toBe(1);
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
+  });
+
+  it('旧模板第一页：下一章直连下一章 id，但 _1/_2 实际存在 → 探针发现并补齐', async () => {
+    // 源站 CDN 曾提供旧模板第一页（分页尚未拆分时），“下一章”按钮直连下一章 id；
+    // 这曾经导致只抓第 1 页且 complete:true。探针机制必须识破它。
+    const stale = html('chapter-38621571-p1.html').replace(
+      '/book/36780/38621571_1.html',
+      '/book/36780_38621574.html',
+    );
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher({ ...routes2871, '/book/36780_38621571.html': stale }),
+      ...noRetry,
+    });
+    expect(r.pageCount).toBe(3);
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
+    expect(r.paragraphs).toContain('难怪荒天会亲自出手，夺走天尊宝纱。');
+  });
+
+  it('无法确认末页（无导航且探针失败）→ 不得标 complete', async () => {
+    const bare = html('chapter-38621571-p1.html').replace(
+      /<div class="read_btn">[\s\S]*?<\/div>/g,
+      '<div class="read_btn"></div>',
+    );
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher(
+        { '/book/36780_38621571.html': bare },
+        ['/book/36780/38621571_1.html'],
+      ),
+      ...noRetry,
+    });
+    expect(r.paragraphs.length).toBeGreaterThan(20);
+    expect(r.complete).toBe(false);
+    expect(r.missingPages).toEqual([1]);
+  });
+
+  it('无法确认末页，但探针 404 → 可标 complete', async () => {
+    const bare = html('chapter-38621571-p1.html').replace(
+      /<div class="read_btn">[\s\S]*?<\/div>/g,
+      '<div class="read_btn"></div>',
+    );
+    const r = await fetchChapter('38621571', {
+      fetcher: fixtureFetcher({ '/book/36780_38621571.html': bare }),
+      ...noRetry,
+    });
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
   });
 });
 

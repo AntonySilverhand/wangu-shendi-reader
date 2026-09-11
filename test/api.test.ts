@@ -62,6 +62,53 @@ describe('API 路由（同构 handler）', () => {
     }
   });
 
+  it('第 2871 章（38621571）：三页全抓、末页正文存在、complete 来自终章证据', async () => {
+    const fetcher = fakeFetcher({
+      '/book/36780_38621571.html': fixture('chapter-38621571-p1.html'),
+      '/book/36780/38621571_1.html': fixture('chapter-38621571-p2.html'),
+      '/book/36780/38621571_2.html': fixture('chapter-38621571-p3.html'),
+      '/book/36780/38621571_3.html': fixture('chapter-38621571-loopback.html'),
+    });
+    const context = { ...ctx(), fetcher };
+    const res = await handleApi(new URL('https://x/api/chapter?id=38621571'), context);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-reader-cache')).toBe('miss');
+    const body = (await res.json()) as ChapterResult;
+    expect(body.pageCount).toBe(3);
+    expect(body.complete).toBe(true);
+    expect(body.missingPages).toEqual([]);
+    expect(body.prevId).toBe('38621566');
+    expect(body.nextId).toBe('38621574');
+    expect(body.paragraphs).toContain('难怪荒天会亲自出手，夺走天尊宝纱。');
+    // 第二次走缓存
+    const res2 = await handleApi(new URL('https://x/api/chapter?id=38621571'), context);
+    expect(res2.headers.get('x-reader-cache')).toBe('hit');
+  });
+
+  it('分页缺失时 API 返回 complete:false（不会被客户端当成完整缓存）', async () => {
+    const routes: Record<string, string> = {
+      '/book/36780_38621571.html': fixture('chapter-38621571-p1.html'),
+      '/book/36780/38621571_2.html': fixture('chapter-38621571-p3.html'),
+    };
+    const failing = async (input: string): Promise<Response> => {
+      const path = new URL(input).pathname;
+      if (path === '/book/36780/38621571_1.html') throw new Error('network down');
+      const body = routes[path] ?? '';
+      return new Response(body, {
+        status: body ? 200 : 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    };
+    const context = { ...ctx(), fetcher: failing, retries: 0 };
+    const res = await handleApi(new URL('https://x/api/chapter?id=38621571'), context);
+    const body = (await res.json()) as ChapterResult;
+    expect(body.complete).toBe(false);
+    expect(body.missingPages).toEqual([1]);
+    // 已取到的正文仍然返回（先显示缓存/部分内容，再后台补全）
+    expect(body.paragraphs.length).toBeGreaterThan(40);
+    expect(body.paragraphs).toContain('难怪荒天会亲自出手，夺走天尊宝纱。');
+  });
+
   it('目录范围：返回分页分组', async () => {
     const fetcher = fakeFetcher({
       '/book/36780/': fixture('toc-page1.html'),

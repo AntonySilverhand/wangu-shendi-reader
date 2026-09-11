@@ -4,7 +4,7 @@ import { getChapter, openDb, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
-export const CHAPTER_CACHE_VERSION = 3;
+export const CHAPTER_CACHE_VERSION = 4;
 
 /** 版本变更时清掉旧缓存记录：旧版本可能存着“去重后缺段”的内容，绝不能继续复用 */
 export async function purgeOutdatedChapters(): Promise<number> {
