@@ -205,6 +205,77 @@ describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）'
   });
 });
 
+describe('第 4208 章真实 fixture（38626103：5 个物理页）', () => {
+  const routes4208: Record<string, string> = {};
+  for (let n = 0; n < 5; n++) {
+    routes4208[`/book/36780${n === 0 ? '_38626103' : `/38626103_${n}`}.html`] = html(
+      `chapter-38626103-p${n + 1}.html`,
+    );
+  }
+
+  it('第 1 页解析：同章下一页在“下一章”按钮上，prev 是真上一章', () => {
+    const page = parseChapterPage(html('chapter-38626103-p1.html'), '38626103', 0);
+    expect(page.title).toBe('第四千二百零八章 至高组会议');
+    expect(page.sameChapterPages).toEqual([1]);
+    expect(page.prevChapterId).toBe('38626097');
+    expect(page.nextChapterId).toBeNull();
+    expect(page.declaredPageIndex).toBe(0);
+    expect(page.paragraphs.length).toBeGreaterThan(20);
+  });
+  it('第 5 页（末页）：真正下一章 38626110；上一章按钮虽指向 _3 也不影响语义', () => {
+    const page = parseChapterPage(html('chapter-38626103-p5.html'), '38626103', 4);
+    expect(page.sameChapterPages).toEqual([3]); // 源站末页“上一章”指向 _3，URL 身份仍正确
+    expect(page.nextPageIndex).toBeNull();
+    expect(page.nextChapterId).toBe('38626110');
+    expect(page.declaredPageIndex).toBe(4);
+    expect(page.paragraphs.at(-1)).toContain('答案，其实早就有了');
+  });
+  it('fetchChapter：5 页全部抓到、末页正文存在、complete 来自末页下一章', async () => {
+    const requested: string[] = [];
+    const fetcher = async (input: string): Promise<Response> => {
+      const path = new URL(input).pathname;
+      requested.push(path);
+      const body = routes4208[path];
+      return new Response(body ?? '', {
+        status: body !== undefined ? 200 : 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    };
+    const r = await fetchChapter('38626103', { fetcher, ...noRetry });
+    expect(r.pageCount).toBe(5);
+    expect(r.complete).toBe(true);
+    expect(r.missingPages).toEqual([]);
+    expect(r.prevId).toBe('38626097');
+    expect(r.nextId).toBe('38626110');
+    expect(r.paragraphs.length).toBeGreaterThan(180);
+    expect(r.paragraphs).toContain('“答案，其实早就有了！但，我必须亲自去见她，才能解开所有谜题。”张若尘目光变得幽邃。');
+    // 需要抓的只有 0..4；末页已有真正下一章，不应探 _5
+    expect(requested).toEqual([
+      '/book/36780_38626103.html',
+      '/book/36780/38626103_1.html',
+      '/book/36780/38626103_2.html',
+      '/book/36780/38626103_3.html',
+      '/book/36780/38626103_4.html',
+    ]);
+  });
+  it('第 4 页失败：保留 0-3 与第 5 页正文、complete=false、missingPages=[4]', async () => {
+    const failing = async (input: string): Promise<Response> => {
+      const path = new URL(input).pathname;
+      if (path === '/book/36780/38626103_4.html') throw new Error('network down');
+      const body = routes4208[path];
+      return new Response(body ?? '', {
+        status: body !== undefined ? 200 : 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    };
+    const r = await fetchChapter('38626103', { fetcher: failing, ...noRetry });
+    expect(r.pageCount).toBe(4); // 0..3 成功；_4 失败，探针 _5 得到 404（不存在的积极证据）
+    expect(r.complete).toBe(false);
+    expect(r.missingPages).toEqual([4]);
+    expect(r.paragraphs).toContain('“那在于什么？”虚天问道。');
+  });
+});
+
 describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
   const routes2871: Record<string, string> = {
     '/book/36780_38621571.html': html('chapter-38621571-p1.html'),
