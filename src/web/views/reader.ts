@@ -109,6 +109,7 @@ export class ReaderView {
 
   private handleScroll(): void {
     this.onScrollDelta();
+    this.offsetReadyAt = Number.POSITIVE_INFINITY;
     if (this.scrollIdleTimer) clearTimeout(this.scrollIdleTimer);
     this.scrollIdleTimer = setTimeout(() => this.markScrollIdle(), 260);
     const pos = this.capturePosition();
@@ -155,7 +156,8 @@ export class ReaderView {
   }
 
   private pointAt(y: number): { node: Node; offset: number } | null {
-    const x = Math.max(1, Math.min(window.innerWidth / 2, window.innerWidth - 2));
+    const bounds = this.contentEl.getBoundingClientRect();
+    const x = Math.max(1, Math.min((bounds.left + bounds.right) / 2, window.innerWidth - 2));
     const doc = document as Document & {
       caretRangeFromPoint?: (x: number, y: number) => Range | null;
       caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
@@ -179,7 +181,14 @@ export class ReaderView {
   private offsetReadyAt = 0;
 
   markScrollIdle(): void {
-    this.offsetReadyAt = Date.now() + 250;
+    this.scrollIdleTimer = null;
+    this.offsetReadyAt = 0;
+    const pos = this.capturePosition();
+    if (pos && this.current) {
+      this.lastPosition = pos;
+      this.lastPersist = Date.now();
+      this.cb.onPositionChange(pos);
+    }
   }
 
   capturePosition(): { paragraph: number; offset: number } | null {
@@ -301,6 +310,8 @@ export class ReaderView {
   renderLoading(known?: { title?: string; entry: TocEntry | null }): void {
     this.current = null;
     this.lastPosition = null;
+    if (this.scrollIdleTimer) clearTimeout(this.scrollIdleTimer);
+    this.scrollIdleTimer = null;
     this.bannerEl.hidden = true;
     this.titleEl.textContent = known?.entry ? chapterLabel(known.entry) : (known?.title ?? '加载中…');
     clear(this.metaEl);

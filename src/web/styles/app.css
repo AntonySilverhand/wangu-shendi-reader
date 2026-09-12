@@ -711,7 +711,7 @@ button {
   margin: 0 0 10px;
 }
 
-/* 侧栏 / 抽屉目录 */
+/* 侧栏 / 抽屉目录（compact 默认：抽屉；medium/wide：侧栏） */
 .toc-panel {
   position: fixed;
   z-index: 45;
@@ -730,27 +730,29 @@ button {
 .toc-panel.open {
   transform: translateX(0);
 }
-@media (min-width: 960px) {
-  .toc-panel {
-    width: 340px;
-    transform: none;
-    position: fixed;
-    top: calc(var(--topbar-h) + env(safe-area-inset-top));
-    bottom: 0;
-    padding-top: 0;
-    border-top: 0;
-    box-shadow: none;
-    display: none;
-  }
-  .toc-panel.open {
-    display: flex;
-  }
-  .app[data-toc="open"] .reader-root {
-    margin-left: 340px;
-  }
-  .app[data-toc="open"] .topbar {
-    padding-left: 348px;
-  }
+html[data-layout='medium'] .toc-panel,
+html[data-layout='wide'] .toc-panel {
+  width: min(340px, 26vw);
+  transform: none;
+  position: fixed;
+  top: calc(var(--topbar-h) + env(safe-area-inset-top));
+  bottom: 0;
+  padding-top: 0;
+  border-top: 0;
+  box-shadow: none;
+  display: none;
+}
+html[data-layout='medium'] .toc-panel.open,
+html[data-layout='wide'] .toc-panel.open {
+  display: flex;
+}
+html[data-layout='medium'] .app[data-toc='open'] .reader-root,
+html[data-layout='wide'] .app[data-toc='open'] .reader-root {
+  margin-left: min(340px, 26vw);
+}
+html[data-layout='medium'] .app[data-toc='open'] .topbar,
+html[data-layout='wide'] .app[data-toc='open'] .topbar {
+  padding-left: calc(min(340px, 26vw) + 8px);
 }
 .panel-head {
   display: flex;
@@ -1330,31 +1332,94 @@ button {
   display: none !important;
 }
 
-/* 宽屏形态：右侧进度栏 + 主页仪表盘 */
+/* 宽屏形态：右侧进度栏（wide）+ 首页语义网格 */
 .side-rail { display: none; }
-@media (min-width: 1500px) {
-  .side-rail {
-    display: flex;
-    position: fixed;
-    right: 24px;
-    top: calc(var(--topbar-h) + 28px);
-    width: 190px;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-elevated);
-    box-shadow: var(--shadow);
-    z-index: 30;
-  }
-  .side-rail .row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .side-rail .progress-track { margin: 0; }
+html[data-layout='wide'] .side-rail {
+  display: flex;
+  position: fixed;
+  right: max(24px, calc((100vw - 1440px) / 2));
+  top: calc(var(--topbar-h) + 28px);
+  width: clamp(180px, 13vw, 230px);
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  z-index: 30;
 }
+.side-rail .row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.side-rail .progress-track { margin: 0; }
+.app[data-view='home'] .side-rail { display: none; }
+
+/* wide 使用同一 Grid 分配三栏，正文和辅助栏不再独立定位互相覆盖。 */
+html[data-layout='wide'] .app[data-view='reader'] {
+  --nav-space: 0px;
+  display: grid;
+  grid-template-columns: var(--nav-space) minmax(0, 1fr) clamp(190px, 15vw, 240px);
+  gap: clamp(16px, 2vw, 36px);
+  max-width: 1600px;
+  margin-inline: auto;
+  padding-inline: 20px;
+  align-items: start;
+}
+html[data-layout='wide'] .app[data-view='reader'][data-toc='open'] {
+  --nav-space: clamp(260px, 22vw, 320px);
+}
+html[data-layout='wide'] .app[data-view='reader'] .reader-root {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  margin-left: 0;
+}
+html[data-layout='wide'] .app[data-view='reader'] .toc-panel {
+  grid-column: 1;
+  grid-row: 1;
+  position: sticky;
+  inset: auto;
+  top: var(--topbar-h);
+  width: 100%;
+  height: calc(100dvh - var(--topbar-h));
+}
+html[data-layout='wide'] .app[data-view='reader'] .side-rail {
+  grid-column: 3;
+  grid-row: 1;
+  position: sticky;
+  inset: auto;
+  top: calc(var(--topbar-h) + 28px);
+  width: 100%;
+  margin-top: calc(var(--topbar-h) + 28px);
+}
+
+/* medium：主页两列（书卡 + 快捷入口，≥1100 才重排） */
 @media (min-width: 1100px) {
-  .home-root { max-width: 1040px; grid-template-columns: 1fr 1fr; align-items: start; }
-  .home-head { grid-column: 1 / -1; }
-  .book-card { grid-column: 1; }
-  .quick-grid { grid-column: 2; }
-  .quick-grid { grid-template-columns: 1fr 1fr; }
+  html[data-layout='medium'] .home-root {
+    max-width: 1040px;
+    grid-template-columns: minmax(340px, 420px) 1fr;
+    align-items: start;
+  }
+  html[data-layout='medium'] .home-head { grid-column: 1 / -1; }
+  html[data-layout='medium'] .book-card { grid-column: 1; }
+  html[data-layout='medium'] .quick-grid {
+    grid-column: 2;
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
 }
+
+/* wide：三块语义网格（书卡 | 快捷入口 | 最近/本地） */
+html[data-layout='wide'] .home-root {
+  max-width: min(1440px, 94vw);
+  grid-template-columns: minmax(340px, 420px) repeat(2, minmax(240px, 1fr));
+  align-items: start;
+  gap: 22px;
+}
+html[data-layout='wide'] .home-head { grid-column: 1 / -1; }
+html[data-layout='wide'] .book-card { grid-column: 1; grid-row: 2; }
+html[data-layout='wide'] .quick-grid {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+}
+html[data-layout='wide'] .home-recent { grid-column: 1; grid-row: 3; }
+html[data-layout='wide'] .home-local { grid-column: 2 / -1; grid-row: 3; }

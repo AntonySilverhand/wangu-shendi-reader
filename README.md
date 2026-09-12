@@ -6,6 +6,8 @@
 
 ---
 
+v0.0.13 预发布：[修复说明、验证记录、Android 真机验收与旧版数据迁移注意事项](docs/v0.0.13-validation.md)。Android 使用固定 `https://reader.local/` origin，无本地监听端口。
+
 ## 快速开始
 
 ```bash

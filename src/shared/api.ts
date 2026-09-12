@@ -29,6 +29,7 @@ export interface ApiContext {
   now?: () => number;
   /** 测试注入：覆盖书源重试次数（默认走 source.ts 的 MAX_RETRIES） */
   retries?: number;
+  signal?: AbortSignal;
 }
 
 export const CACHE_TTL = {
@@ -146,7 +147,7 @@ export async function handleApi(
           );
         }
         return await cachedJson(ctx, `toc:v2:${BOOK.id}:${from}-${to}`, CACHE_TTL.toc, () =>
-          fetchTocRange(from, to, { fetcher: ctx.fetcher }),
+          fetchTocRange(from, to, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries }),
         );
       }
 
@@ -168,7 +169,7 @@ export async function handleApi(
               headers: { 'x-reader-cache': 'hit', 'cache-control': 'no-store' },
             });
           }
-          const data = await fetchChapter(id, { fetcher: ctx.fetcher, retries: ctx.retries });
+          const data = await fetchChapter(id, { fetcher: ctx.fetcher, retries: ctx.retries, signal: ctx.signal, highPriority: url.searchParams.get('background') !== '1' });
           const ttl = data.complete ? CACHE_TTL.chapter : CACHE_TTL.chapterPartial;
           await ctx.cache.put(key, { status: 200, body: JSON.stringify(data) }, ttl);
           return json(data, {

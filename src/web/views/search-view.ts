@@ -11,7 +11,7 @@ interface Match {
   end: number;
 }
 
-const MAX_MATCHES = 500;
+const MAX_HIGHLIGHTS = 500;
 
 export class ChapterSearch {
   readonly element: HTMLDivElement;
@@ -80,6 +80,8 @@ export class ChapterSearch {
   }
 
   close(): void {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = null;
     this.openState = false;
     this.element.classList.remove('open');
     this.opts.onOpenChange?.(false);
@@ -114,7 +116,7 @@ export class ChapterSearch {
     }
     const lower = query.toLowerCase();
     const paragraphs = Array.from(content.children) as HTMLElement[];
-    outer: for (let p = 0; p < paragraphs.length; p++) {
+    for (let p = 0; p < paragraphs.length; p++) {
       const text = paragraphs[p]!.textContent ?? '';
       const haystack = text.toLowerCase();
       let from = 0;
@@ -122,7 +124,6 @@ export class ChapterSearch {
         const idx = haystack.indexOf(lower, from);
         if (idx < 0) break;
         this.matches.push({ paragraph: p, start: idx, end: idx + query.length });
-        if (this.matches.length >= MAX_MATCHES) break outer;
         from = idx + Math.max(1, query.length);
       }
     }
@@ -151,6 +152,7 @@ export class ChapterSearch {
     let currentRange: Range | null = null;
 
     for (let i = 0; i < this.matches.length; i++) {
+      if (i !== this.current && (!canUseCssHighlight || i >= MAX_HIGHLIGHTS)) continue;
       const m = this.matches[i]!;
       const p = paragraphs[m.paragraph];
       if (!p) continue;
@@ -160,19 +162,19 @@ export class ChapterSearch {
       const range = document.createRange();
       range.setStart(startRange.startContainer, startRange.startOffset);
       range.setEnd(endRange.startContainer, endRange.startOffset);
-      allRanges.push(range);
+      allRanges[i] = range;
       if (i === this.current) currentRange = range;
     }
     this.highlightRanges = allRanges;
 
     if (canUseCssHighlight) {
-      registry.set('reader-search', new highlightCtor(...allRanges) as never);
+      registry.set('reader-search', new highlightCtor(...allRanges.filter(Boolean)) as never);
       if (currentRange) registry.set('reader-search-current', new highlightCtor(currentRange) as never);
       return;
     }
-    // 回退：<mark> 包裹（保留文本，复制不受影响）
+    // 旧 WebView 只高亮当前命中；匹配列表和导航仍覆盖全部结果。
     const marks: HTMLElement[] = [];
-    for (let i = 0; i < this.matches.length; i++) {
+    for (let i = this.current; i >= 0 && i === this.current; i++) {
       const m = this.matches[i]!;
       const p = paragraphs[m.paragraph];
       if (!p) continue;

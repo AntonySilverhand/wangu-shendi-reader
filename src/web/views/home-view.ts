@@ -75,7 +75,7 @@ export function renderHome(container: HTMLElement, deps: HomeDeps): void {
     quickCard('导入 TXT', '书源不可用时的备份路径', deps.onImportTxt),
   );
 
-  const recent = el('section');
+  const recent = el('section', { class: 'home-recent' });
   recent.appendChild(el('h2', { class: 'section-title', text: '最近阅读' }));
   if (history.length === 0) {
     recent.appendChild(el('p', { class: 'book-progress', text: '暂无记录' }));
@@ -97,7 +97,7 @@ export function renderHome(container: HTMLElement, deps: HomeDeps): void {
     recent.appendChild(list);
   }
 
-  const localSection = el('section');
+  const localSection = el('section', { class: 'home-local' });
   if (deps.localBooks.length > 0) {
     localSection.appendChild(el('h2', { class: 'section-title', text: '本地导入的书' }));
     const grid = el('div', { class: 'quick-grid' });
@@ -127,21 +127,11 @@ export function renderHome(container: HTMLElement, deps: HomeDeps): void {
     localSection.appendChild(grid);
   }
 
-  container.appendChild(
-    el(
-      'div',
-      { class: 'home-root', id: 'home-root' },
-      el(
-        'div',
-        { class: 'home-head' },
-        el('h1', { text: '我的书架' }),
-        el('p', { text: '干净、专注、为长时间阅读而做' }),
-      ),
-      card,
-      quick,
-      recent,
-      localSection,
-    ),
+  container.append(
+    el('div', { class: 'home-head' },
+      el('h1', { text: '我的书架' }),
+      el('p', { text: '干净、专注、为长时间阅读而做' })),
+    card, quick, recent, localSection,
   );
 }
 

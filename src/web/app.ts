@@ -19,6 +19,8 @@ import { listChapterIds, clearBookContent, storageStats } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { BOOK, type TocEntry } from '../shared/source.ts';
 import { excerpt } from './format.ts';
+import { bump } from './instrument.ts';
+import { LayoutController } from './layout.ts';
 
 const REMOTE_BOOK_ID = BOOK.id;
 
@@ -38,6 +40,8 @@ export class App {
   private currentChapterId: string | null = null;
   private renderedChapterId: string | null = null;
   private loadingChapterId: string | null = null;
+  private chapterGeneration = 0;
+  private chapterController: AbortController | null = null;
   private currentEntry: TocEntry | null = null;
   private view: View = 'home';
   private cachedIds = new Set<string>();
@@ -63,6 +67,18 @@ export class App {
   constructor() {
     this.toc = new TocStore(this.bookId);
     this.download = this.createDownloadManager();
+    this.layout = new LayoutController({
+      onModeChange: (mode, prev) => {
+        // 回到 compact：目录抽屉必须收起（否则覆盖整屏）
+        if (mode === 'compact') this.tocView.close();
+        // 模式切换后布局稳定时恢复阅读位置（段落锚点不依赖像素）
+        if (prev !== mode && this.view === 'reader') {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => this.reader.refreshLayout());
+          });
+        }
+      },
+    });
     this.reader = new ReaderView({
       onOpenToc: () => this.tocView.toggle(),
       onOpenSettings: () => this.openSettings(),
@@ -78,7 +94,7 @@ export class App {
     this.tocView = new TocView({
       store: this.toc,
       onOpenChapter: (id) => {
-        if (window.innerWidth < 960) this.tocView.close();
+        if (this.layout.current === 'compact') this.tocView.close();
         void this.openChapter(id);
       },
       onOpenTocData: () => this.openData(),
@@ -106,6 +122,7 @@ export class App {
   async start(): Promise<void> {
     applySettings(this.settings.get());
     this.buildShell();
+    this.layout.start();
     this.bindEvents();
     try {
       await this.toc.init();
@@ -142,7 +159,7 @@ export class App {
       }
     });
     this.applyRoute();
-    if (window.innerWidth >= 1100) this.tocView.open();
+    if (this.layout.current !== 'compact' && window.innerWidth >= 1100) this.tocView.open();
     document.getElementById('app')?.setAttribute('aria-busy', 'false');
   }
 
@@ -313,7 +330,7 @@ export class App {
         this.search.close();
         return;
       }
-      if (this.tocView.isOpen() && window.innerWidth < 960) {
+      if (this.tocView.isOpen() && this.layout.current === 'compact') {
         this.tocView.close();
         return;
       }
@@ -416,6 +433,11 @@ export class App {
   }
 
   private showHome(): void {
+    this.reader.flushPosition();
+    this.chapterController?.abort();
+    this.chapterGeneration++;
+    this.loadingChapterId = null;
+    this.cancelPrefetch();
     this.setView('home');
     this.tocView.close();
     this.renderHomeView();
@@ -500,25 +522,38 @@ export class App {
     chapterId: string,
     opts: { restorePosition?: boolean; push?: boolean; force?: boolean; anchor?: { paragraph: number; offset: number } } = {},
   ): Promise<void> {
+    bump('chapterOpens');
     const sameRendered = chapterId === this.renderedChapterId;
     const alreadyLoading = chapterId === this.loadingChapterId;
     if (opts.push !== false && location.hash !== `#/read/${chapterId}`) {
       location.hash = `#/read/${chapterId}`;
     }
+    if (this.renderedChapterId && !sameRendered) this.reader.flushPosition();
     this.currentChapterId = chapterId;
     this.setView('reader');
     this.updateTopbar();
     // 已渲染或正在加载同一章：不重复请求（hashchange 会再次调用本方法）
     if (!opts.force && (sameRendered || alreadyLoading)) {
-      if (sameRendered) this.reader.showBars();
+      if (sameRendered) {
+        if (opts.anchor) {
+          this.reader.restorePosition(opts.anchor);
+          this.reader.flushPosition();
+        }
+        this.reader.showBars();
+      }
       return;
     }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    if (this.renderedChapterId && !sameRendered) this.reader.flushPosition();
+    this.chapterController?.abort();
+    this.cancelPrefetch();
+    const controller = new AbortController();
+    this.chapterController = controller;
+    const generation = ++this.chapterGeneration;
+    this.renderedChapterId = null;
     this.loadingChapterId = chapterId;
     const index = this.toc.indexOfChapter(chapterId);
     this.currentEntry = index >= 0 ? this.toc.entryAt(index) : null;
-    this.tocView.close();
+    if (this.layout.current === 'compact') this.tocView.close();
 
     const saved = this.personal.getProgress(this.bookId);
     const restore =
@@ -533,11 +568,17 @@ export class App {
 
     const offline = navigator.onLine === false;
     try {
-      const record = await loadChapterRecord(this.bookId, chapterId, { force: opts.force });
-      if (this.disposed || this.currentChapterId !== chapterId) return;
+      const record = await loadChapterRecord(this.bookId, chapterId, { force: opts.force, signal: controller.signal });
+      if (this.disposed || generation !== this.chapterGeneration || this.currentChapterId !== chapterId) {
+        bump('chapterStaleAborts');
+        return;
+      }
       this.renderLoadedChapter(chapterId, record, restore);
     } catch (err) {
-      if (this.disposed || this.currentChapterId !== chapterId) return;
+      if (this.disposed || generation !== this.chapterGeneration || this.currentChapterId !== chapterId) {
+        bump('chapterStaleAborts');
+        return;
+      }
       const message = offline
         ? '当前处于离线状态，这一章还没有下载。'
         : err instanceof Error
@@ -546,7 +587,10 @@ export class App {
       this.reader.renderError(message, offline ? '可在“下载章节”中提前缓存需要的章节。' : '可重试，或先从目录换一章。');
       this.setSearchContentNull();
     } finally {
-      if (this.loadingChapterId === chapterId) this.loadingChapterId = null;
+      if (generation === this.chapterGeneration) {
+        this.loadingChapterId = null;
+        this.chapterController = null;
+      }
     }
   }
 
@@ -564,7 +608,9 @@ export class App {
     const prevId = prev?.id ?? record.prevId ?? null;
     const nextId = next?.id ?? record.nextId ?? null;
 
+    this.reader.setInitialPosition(restore);
     this.reader.renderChapter({ record, entry, prevId, nextId }, { restore: restore !== null });
+    this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
     if (record.source === 'local') {
       this.reader.showBanner('本地导入内容');
@@ -637,10 +683,11 @@ export class App {
   /* --------------------------- 位置与书签 --------------------------- */
 
   private savePosition(pos: { paragraph: number; offset: number }): void {
-    if (!this.currentChapterId) return;
-    const index = this.toc.indexOfChapter(this.currentChapterId);
+    const chapterId = this.reader.currentChapterId;
+    if (!chapterId) return;
+    const index = this.toc.indexOfChapter(chapterId);
     const value: ReadingPosition = {
-      chapterId: this.currentChapterId,
+      chapterId,
       chapterIndex: index >= 0 ? index : null,
       paragraph: pos.paragraph,
       offset: pos.offset,
@@ -673,7 +720,7 @@ export class App {
     );
     if (existing) {
       this.personal.removeBookmark(this.bookId, existing.id);
-      showToast('已取消书签');
+      showToast(this.personal.storageHealthy ? '已取消书签' : '已取消书签，但保存失败（存储不可用）');
     } else {
       const paragraphs = this.reader.paragraphElements;
       const text = paragraphs[pos.paragraph]?.textContent ?? '';
@@ -685,7 +732,11 @@ export class App {
         offset: pos.offset,
         excerpt: excerpt(text, 80),
       });
-      showToast('已添加书签');
+      showToast(
+        this.personal.storageHealthy
+          ? '已添加书签'
+          : '书签已添加但保存失败：存储不可用，重启后可能丢失',
+      );
     }
     this.updateTopbar();
   }
@@ -703,7 +754,7 @@ export class App {
       this.prefetchTimer = null;
       if (document.hidden) return;
       this.prefetchController = new AbortController();
-      void loadChapterRecord(this.bookId, nextId, { signal: this.prefetchController.signal })
+      void loadChapterRecord(this.bookId, nextId, { signal: this.prefetchController.signal, background: true })
         .then(() => this.refreshCachedIds())
         .catch(() => undefined);
     }, 1600);
@@ -719,6 +770,7 @@ export class App {
   }
 
   private cacheRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private layout: LayoutController;
 
   private async refreshCachedIds(immediate = false): Promise<void> {
     if (immediate) {
@@ -861,6 +913,9 @@ export class App {
     }
     closeActiveSheet();
     this.reader.flushPosition();
+    this.chapterController?.abort();
+    this.chapterGeneration++;
+    this.cancelPrefetch();
     this.bookId = bookId;
     this.currentChapterId = null;
     this.renderedChapterId = null;
@@ -872,7 +927,7 @@ export class App {
     this.tocView = new TocView({
       store: this.toc,
       onOpenChapter: (id) => {
-        if (window.innerWidth < 960) this.tocView.close();
+        if (this.layout.current === 'compact') this.tocView.close();
         void this.openChapter(id);
       },
       onOpenTocData: () => this.openData(),

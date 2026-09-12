@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 构建 Android APK（无需 Gradle，直接使用 Android SDK build-tools）
+# DEBUG=1 bash android/build.sh <ver>  → 注入 android:debuggable="true"（仅供持久化自动化验证）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -13,6 +14,12 @@ D8="${D8:-$BT/d8}"                     # Java 实现，跨架构可用
 VERSION="${1:-0.0.2}"
 OUT="artifacts/wangu-reader-v${VERSION}.apk"
 
+if [ "${DEBUG:-0}" = "1" ]; then
+  OUT="artifacts/wangu-reader-v${VERSION}-debug.apk"
+else
+  OUT="artifacts/wangu-reader-v${VERSION}.apk"
+fi
+
 echo "[1/6] 构建 Web 资源（Android 目标）"
 npm run build:android >/dev/null
 rm -rf android/assets && mkdir -p android/assets
@@ -21,8 +28,20 @@ cp -r dist-android android/assets/www
 echo "[2/6] 编译资源"
 cd android
 rm -rf build && mkdir -p build/compiled build/classes build/dex
-"$AAPT" package -f -M AndroidManifest.xml -S res -A assets -I "$AJ" \
+MANIFEST=AndroidManifest.xml
+if [ "${DEBUG:-0}" = "1" ]; then
+  # Debian aapt v1 要求 manifest 文件名必须是 AndroidManifest.xml → 临时替换再恢复
+  cp AndroidManifest.xml build/AndroidManifest.orig.xml
+  sed 's|<application|<application android:debuggable="true"|' AndroidManifest.xml > build/AndroidManifest.debuggen.xml
+  mv build/AndroidManifest.debuggen.xml AndroidManifest.xml
+  trap 'mv build/AndroidManifest.orig.xml AndroidManifest.xml' EXIT
+fi
+"$AAPT" package -f -M "$MANIFEST" -S res -A assets -I "$AJ" \
   --min-sdk-version 24 --target-sdk-version 34 -F build/base.apk
+if [ "${DEBUG:-0}" = "1" ]; then
+  mv build/AndroidManifest.orig.xml AndroidManifest.xml
+  trap - EXIT
+fi
 
 echo "[3/6] 编译 Java"
 javac -source 1.8 -target 1.8 -bootclasspath "$AJ" -encoding UTF-8 \

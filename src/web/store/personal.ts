@@ -4,6 +4,7 @@
  * 清理正文缓存不会触碰这里的数据。
  */
 import type { Settings } from './settings.ts';
+import { bump } from '../instrument.ts';
 
 export interface ReadingPosition {
   chapterId: string;
@@ -114,7 +115,8 @@ function normalize(raw: unknown): PersonalData {
 export class PersonalStore {
   private data: PersonalData;
   private listeners = new Set<() => void>();
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistFailed = false;
+  private lastPersistError: string | null = null;
 
   constructor() {
     let raw: unknown = null;
@@ -127,6 +129,16 @@ export class PersonalStore {
     this.data = normalize(raw);
   }
 
+  /** 最近一次写盘是否失败（供 UI 给出可诊断反馈） */
+  get storageHealthy(): boolean {
+    return !this.persistFailed;
+  }
+
+  /** 最近一次写盘失败的原因（无则 null） */
+  get storageError(): string | null {
+    return this.lastPersistError;
+  }
+
   private book(bookId: string): BookPersonal {
     let b = this.data.books[bookId];
     if (!b) {
@@ -136,24 +148,29 @@ export class PersonalStore {
     return b;
   }
 
-  private scheduleSave(): void {
-    if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = null;
-      this.flush();
-    }, 400);
+  /**
+   * 同步写盘。个人数据量极小（书签/进度/历史），偏向 durability：
+   * 每次变更立即落盘，不依赖 400ms debounce 或页面生命周期。
+   * 失败绝不静默：标记 + console.error，UI 可读取 storageHealthy/storageError。
+   */
+  private persistNow(): boolean {
+    try {
+      localStorage.setItem(PERSONAL_KEY, JSON.stringify(this.data));
+      this.persistFailed = false;
+      this.lastPersistError = null;
+      bump('personalSaves');
+      return true;
+    } catch (err) {
+      this.persistFailed = true;
+      this.lastPersistError = err instanceof Error ? err.message : String(err);
+      bump('personalSaveFails');
+      console.error('[personal] localStorage 写入失败，个人数据未落盘：', this.lastPersistError);
+      return false;
+    }
   }
 
   flush(): void {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-    try {
-      localStorage.setItem(PERSONAL_KEY, JSON.stringify(this.data));
-    } catch {
-      /* 存储满时静默失败，正文缓存可清理后再试 */
-    }
+    this.persistNow();
   }
 
   private changed(): void {
@@ -172,7 +189,8 @@ export class PersonalStore {
   setProgress(bookId: string, pos: ReadingPosition, options?: { silent?: boolean }): void {
     const b = this.book(bookId);
     b.progress = pos;
-    this.scheduleSave();
+    // 进度回调已被 Reader 限频（≈1 次/秒），直接同步落盘
+    this.persistNow();
     if (!options?.silent) this.changed();
   }
 
@@ -188,7 +206,7 @@ export class PersonalStore {
     };
     const list = this.book(bookId).bookmarks;
     list.unshift(entry);
-    this.scheduleSave();
+    this.persistNow(); // 书签操作必须立即完成持久化
     this.changed();
     return entry;
   }
@@ -196,13 +214,13 @@ export class PersonalStore {
   removeBookmark(bookId: string, id: string): void {
     const b = this.book(bookId);
     b.bookmarks = b.bookmarks.filter((x) => x.id !== id);
-    this.scheduleSave();
+    this.persistNow();
     this.changed();
   }
 
   clearBookmarks(bookId: string): void {
     this.book(bookId).bookmarks = [];
-    this.scheduleSave();
+    this.persistNow();
     this.changed();
   }
 
@@ -216,7 +234,7 @@ export class PersonalStore {
       0,
       HISTORY_LIMIT,
     );
-    this.scheduleSave();
+    this.persistNow(); // 最近阅读立即持久化
     this.changed();
   }
 

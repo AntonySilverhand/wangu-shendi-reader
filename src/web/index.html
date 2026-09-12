@@ -16,6 +16,14 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <script>
+      // 首屏前设置语义布局模式（与 src/web/layout.ts 同步的断点）
+      (function () {
+        var w = window.innerWidth || 0;
+        document.documentElement.setAttribute(
+          'data-layout',
+          w >= 1600 ? 'wide' : w >= 840 ? 'medium' : 'compact',
+        );
+      })();
       // 在首屏绘制前应用主题与排版，避免闪白（读取失败时使用默认亮色）
       (function () {
         try {

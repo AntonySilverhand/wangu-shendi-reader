@@ -757,6 +757,7 @@ export async function fetchTocRange(
   for (let p = from; p <= to; p++) pages.push(p);
 
   const fetched = await mapWithConcurrency(pages, 2, async (page) => {
+    if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
     try {
       const { html } = await fetchSourceHtml(buildTocUrl(page), { ...opts, highPriority: false });
       const classified = classifyTocItems(parseTocPageHtml(html, page), page);
@@ -866,6 +867,15 @@ export function enqueueUpstream<T>(task: () => Promise<T>, high = true): Promise
   });
 }
 
+/** 仪表：当前排队/活跃上游任务数（测试取证用，同构无副作用） */
+export function upstreamQueueSize(): number {
+  return upstreamJobs.length;
+}
+
+export function upstreamActiveCount(): number {
+  return upstreamActive;
+}
+
 export interface FetchTextResult {
   html: string;
   finalUrl: string;
@@ -951,6 +961,7 @@ async function fetchSourceHtmlDirect(
         const html = new TextDecoder('utf-8').decode(buf);
         return { html, finalUrl, bytes: buf.byteLength };
       } catch (err) {
+        if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
         const aborted = err instanceof Error && err.name === 'AbortError';
         const sourceErr =
           err instanceof SourceError
@@ -1069,6 +1080,7 @@ export async function fetchChapter(
   };
 
   while (fetched.size < MAX_CHAPTER_PAGES) {
+    if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
     if (queue.length === 0) {
       const maxIdx = fetched.size > 0 ? Math.max(...fetched.keys()) : -1;
       if (maxIdx < 0) break; // 第 0 页都没拿到：由 firstError 抛出或按失败结果返回

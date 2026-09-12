@@ -25,15 +25,16 @@ export interface ApiGetOptions {
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(t);
-        reject(new DOMException('aborted', 'AbortError'));
-      },
-      { once: true },
-    );
+    if (signal?.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+    const abort = () => {
+      clearTimeout(t);
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
   });
 
 export async function apiGet<T>(path: string, opts: ApiGetOptions = {}): Promise<T> {

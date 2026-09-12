@@ -304,6 +304,13 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   );
 
   // 个人数据导出 / 导入
+  const storageNote = el('p', {
+    class: 'loading-note',
+    style: { textAlign: 'left' },
+    text: deps.personal.storageHealthy
+      ? '个人数据存储正常（每次变更立即落盘）'
+      : `⚠ 个人数据写入失败：${deps.personal.storageError ?? '未知原因'}（书签/进度可能无法保存）`,
+  });
   const exportPersonalBtn = el('button', { class: 'btn small', type: 'button' }, '导出书签与进度');
   exportPersonalBtn.addEventListener('click', () => {
     const json = deps.onExportPersonal();
@@ -340,6 +347,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
     sheetSection(
       '个人数据（书签、进度、设置）',
       el('div', { class: 'row-actions' }, exportPersonalBtn, importPersonalBtn, importPersonalInput),
+      storageNote,
     ),
   );
 
@@ -465,7 +473,9 @@ export function openDownloadSheet(deps: SettingsDeps): SheetHandle {
   startBtn.addEventListener('click', () => {
     if (!deps.toc.isComplete) {
       showToast('目录尚未加载完整，先下载目录');
-      void deps.toc.loadAll();
+      void deps.toc.loadRemaining().then((result) => {
+        if (result === 'exhausted') showToast('部分目录页加载失败，可稍后重试');
+      });
       return;
     }
     void deps.download.start(fromIndex, toIndex);

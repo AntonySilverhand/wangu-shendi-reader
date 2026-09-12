@@ -139,8 +139,8 @@ export class SettingsStore {
     applySettings(this.value);
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.value));
-    } catch {
-      /* 存储不可用时仅内存生效 */
+    } catch (err) {
+      console.error('[settings] localStorage 写入失败：', err instanceof Error ? err.message : String(err));
     }
     for (const fn of this.listeners) fn(this.value);
     return this.value;

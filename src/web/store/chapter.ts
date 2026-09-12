@@ -52,8 +52,10 @@ async function refreshInBackground(bookId: string, chapterId: string, stale: Cha
     const better =
       record.paragraphs.length > stale.paragraphs.length ||
       (record.complete && !stale.complete);
-    await putChapter(record).catch(() => undefined);
-    if (better) notifyUpdate(record);
+    if (record.charCount >= stale.charCount && record.paragraphs.length >= stale.paragraphs.length) {
+      await putChapter(record).catch(() => undefined);
+      if (better) notifyUpdate(record);
+    }
   } catch {
     /* 源站不可用：保留已缓存内容 */
   }
@@ -82,6 +84,7 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
 
 export interface LoadChapterOptions {
   force?: boolean;
+  background?: boolean;
   signal?: AbortSignal;
   onNetworkStart?: () => void;
 }
@@ -92,6 +95,7 @@ export async function loadChapterRecord(
   opts: LoadChapterOptions = {},
 ): Promise<ChapterRecord> {
   const key = `${bookId}:${chapterId}`;
+  if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
   if (!opts.force) {
     const cached = await getChapter(bookId, chapterId);
     if (cached) {
@@ -105,17 +109,20 @@ export async function loadChapterRecord(
     }
   }
   const existing = inFlight.get(key);
-  if (existing) return existing;
+  if (existing && !opts.signal) return existing;
 
   const task = (async () => {
     opts.onNetworkStart?.();
     try {
-      const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
+      const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}${opts.background ? '&background=1' : ''}`, {
         signal: opts.signal,
-        retries: 1,
-        timeoutMs: 45_000,
+        retries: 0,
+        timeoutMs: 20_000,
       });
+      if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
       const record = toRecord(bookId, data);
+      const previous = await getChapter(bookId, chapterId).catch(() => null);
+      if (previous && (previous.charCount > record.charCount || previous.paragraphs.length > record.paragraphs.length)) return previous;
       try {
         await putChapter(record);
       } catch {
@@ -131,7 +138,7 @@ export async function loadChapterRecord(
   try {
     return await task;
   } finally {
-    inFlight.delete(key);
+    if (inFlight.get(key) === task) inFlight.delete(key);
   }
 }
 

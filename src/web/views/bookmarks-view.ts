@@ -59,7 +59,7 @@ export function openBookmarksSheet(deps: BookmarksDeps): SheetHandle {
               onclick: () => {
                 deps.personal.removeBookmark(deps.bookId, bm.id);
                 render();
-                showToast('已删除书签');
+                showToast(deps.personal.storageHealthy ? '已删除书签' : '删除未保存：存储写入失败');
               },
             },
             '删除',
@@ -79,6 +79,7 @@ export function openBookmarksSheet(deps: BookmarksDeps): SheetHandle {
       if (!ok) return;
       deps.personal.clearBookmarks(deps.bookId);
       render();
+      if (!deps.personal.storageHealthy) showToast('清空未保存：存储写入失败');
     },
   });
 

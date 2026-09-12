@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.wanshu.reader"
-    android:versionCode="12"
-    android:versionName="0.0.12">
+    android:versionCode="13"
+    android:versionName="0.0.13">
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <application
       android:label="@string/app_name"
       android:icon="@drawable/ic_launcher"
-      android:usesCleartextTraffic="true"
       android:hardwareAccelerated="true"
       android:theme="@android:style/Theme.Material.NoActionBar">
     <activity
