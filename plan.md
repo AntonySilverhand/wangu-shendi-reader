@@ -1,5 +1,9 @@
 # Android edge-to-edge display plan
 
+## Implementation status (v0.0.15)
+
+The implementation and follow-up fixes are in place, including shared overlay lifecycle, native-owned IME resizing, four-edge layout safety, UI-thread/allowlisted Bridge handling and regression tests. Browser/JVM checks and APK construction pass. **Device acceptance is still pending**: this ARM workspace cannot run the SDK's x86-64 adb binary. See [`android/VALIDATION.md`](android/VALIDATION.md) for executed checks, device/upgrade test commands and remaining visual acceptance criteria.
+
 ## Goal and recommendation
 
 Make the APK feel integrated with the whole phone screen rather than displaying the reader between two dark Android strips.
@@ -129,4 +133,4 @@ Test at least one physical phone, supplemented by emulators:
 3. Complete device, keyboard, lifecycle, and reading-position regression checks.
 4. Add optional immersive reading in a separate change after the default behavior is stable.
 
-This document is a plan only; no application code has been changed.
+The sections above retain the original design plan. Current implementation and verification status is recorded in `android/VALIDATION.md`; unexecuted device tests must not be counted as completed.

@@ -1,135 +1,158 @@
 /**
- * 真机/模拟器 Android Edge-to-Edge 与系统栏显示验证脚本。
- * 运行环境需要 adb 及已安装的 debug APK（DEBUG=1 bash android/build.sh 0.0.14）。
- *
- * 验证项目：
- * 1. 原生桥接 window._nativeDisplayBridge 正常挂载
- * 2. 原生安全区快照传递有效（top/bottom/density 均大于 0）
- * 3. CSS 变量 --native-safe-* 成功生效并驱动 UI 布局
- * 4. 主题切换时正确调用原生 setTheme 并同步系统栏图标
- * 5. 沉浸式阅读开启/关闭时切换全屏并保持阅读位置锚点
+ * Device-only checks, not browser emulation. Requires DEBUG=1 v0.0.15+ APK.
+ * Run on a test device: adds a named local book; restores settings/orientation, never clears data.
+ * ADB=/path/to/native/adb node tools/android-display-adb.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { adb, PKG, connectReader, seedLocalBook, delay } from './android-device.mjs';
 
-const PKG = 'org.wanshu.reader';
-const adbPath = process.env.ADB || 'adb';
-const adb = (...args) => execFileSync(adbPath, args, { encoding: 'utf8', timeout: 30000 }).trim();
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+let connection, originalSettings, rawSettings, rotation, autoRotation;
+const dir = 'artifacts/android-display';
+const snapshot = page => page.evaluate(() => JSON.parse(window._nativeDisplayBridge.getDisplaySnapshot()));
+async function capture(name) {
+  await writeFile(`${dir}/${name}.png`, execFileSync(process.env.ADB || 'adb', ['exec-out', 'screencap', '-p'], { timeout: 30000 }));
+  await writeFile(`${dir}/${name}-windows.txt`, adb('shell', 'dumpsys', 'window', 'windows'));
+}
+async function bars(page, visible) {
+  await page.waitForFunction(v => {
+    const s = JSON.parse(window._nativeDisplayBridge.getDisplaySnapshot());
+    return s.statusVisible === v && s.navigationVisible === v;
+  }, visible, { timeout: 10000 });
+}
+try {
+  await mkdir(dir, { recursive: true });
+  adb('shell', 'am', 'force-stop', PKG);
+  connection = await connectReader();
+  const { page } = connection;
+  originalSettings = await page.evaluate(() => window.__readerApp.settings.get());
+  rawSettings = await page.evaluate(() => localStorage.getItem('reader.settings.v1'));
+  const sdk = Number(adb('shell', 'getprop', 'ro.build.version.sdk'));
+  rotation = adb('shell', 'settings', 'get', 'system', 'user_rotation');
+  autoRotation = adb('shell', 'settings', 'get', 'system', 'accelerometer_rotation');
+  adb('shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0');
+  adb('shell', 'settings', 'put', 'system', 'user_rotation', '0');
+  await page.evaluate(() => window.__readerApp.settings.update({ immersiveReading: false }));
+  const title = await seedLocalBook(page, 'display-test');
+  await bars(page, true);
+  await delay(500);
+  const baseline = await snapshot(page);
+  assert.ok(baseline.hostHeight > 0 && baseline.windowHeight > 0);
+  assert.equal(baseline.hostHeight, baseline.windowHeight, 'WebView host does not fill native window');
+  assert.equal(baseline.webHeight, baseline.hostHeight, 'Unexpected whole-WebView padding/shrink');
+  const css = await page.evaluate(() => ({
+    density: devicePixelRatio,
+    height: innerHeight,
+    top: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')),
+    bottom: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')),
+    toolbarHeight: document.querySelector('.topbar').getBoundingClientRect().height,
+    toolbarBase: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h')),
+  }));
+  assert.ok(Math.abs(css.density - baseline.density) < 0.01, 'Native px/CSS px scale differs');
+  assert.ok(Math.abs(css.height * css.density - baseline.webHeight) <= 2, 'WebView viewport was inset twice');
+  assert.equal(css.top, baseline.top);
+  assert.equal(css.bottom, baseline.bottom);
+  assert.ok(Math.abs(css.toolbarHeight - css.toolbarBase - baseline.top) <= 1, 'Top inset applied more than once');
 
-let port;
+  const colors = { light: '#f6f5f2', paper: '#f5edda', eink: '#ededed', dark: '#161719', black: '#000000' };
+  for (const [theme, color] of Object.entries(colors)) {
+    await page.evaluate(t => window.__readerApp.settings.update({ theme: t }), theme);
+    const expectedAppearance = theme === 'dark' || theme === 'black' ? 0 : sdk >= 26 ? 3 : 1;
+    await page.waitForFunction(({ color, appearance }) => {
+      const s = JSON.parse(window._nativeDisplayBridge.getDisplaySnapshot());
+      return s.backgroundColor === color && s.appearance === appearance;
+    }, { color, appearance: expectedAppearance });
+    await capture(theme); // physical screenshot includes real status/navigation bars
+  }
+  await page.evaluate(() => window._nativeDisplayBridge.setTheme('arbitrary-theme', '#ffffff'));
+  await delay(200);
+  assert.equal((await snapshot(page)).backgroundColor, '#000000', 'Native whitelist accepted unknown theme');
+  await page.evaluate(() => window._nativeDisplayBridge.setTheme('light', '#000000'));
+  await delay(200);
+  assert.equal((await snapshot(page)).backgroundColor, '#000000', 'Native whitelist accepted mismatched color');
 
-async function launch() {
+  await page.evaluate(() => window.scrollTo(0, 1800));
+  await delay(400);
+  const before = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
+  await page.evaluate(() => window.__readerApp.settings.update({ immersiveReading: true }));
+  await bars(page, false);
+  await delay(400);
+  const after = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
+  assert.equal(after.paragraph, before.paragraph);
+  assert.ok(Math.abs(after.offset - before.offset) <= 1, 'Character anchor changed');
+  await capture('immersive');
+
+  await page.evaluate(() => window.__readerApp.openData());
+  await bars(page, true);
+  await page.getByRole('button', { name: '下载章节…', exact: true }).click();
+  await delay(400);
+  await bars(page, true);
+  await page.locator('[data-testid="download-sheet"] [data-testid="sheet-close"]').click();
+  await bars(page, false);
+
+  await page.evaluate(() => window.__readerApp.search.open());
+  await page.locator('.search-bar input').tap();
+  await bars(page, true);
+  await page.waitForFunction(() => JSON.parse(window._nativeDisplayBridge.getDisplaySnapshot()).ime > 0, null, { timeout: 10000 });
+  await delay(400);
+  const keyboard = await snapshot(page);
+  assert.equal(keyboard.bottom, 0, 'Keyboard mistaken for navigation safe area');
+  assert.equal(keyboard.webHeight, keyboard.hostHeight - keyboard.keyboardOverlap, 'IME deducted twice');
+  const inputVisible = await page.locator('.search-bar input').evaluate(e => {
+    const r = e.getBoundingClientRect();
+    return r.top >= 0 && r.bottom <= innerHeight;
+  });
+  assert.ok(inputVisible, 'Focused input hidden behind keyboard');
+  await capture('keyboard');
+  adb('shell', 'input', 'keyevent', '4'); // system back dismisses IME first
+  await page.waitForFunction(() => JSON.parse(window._nativeDisplayBridge.getDisplaySnapshot()).ime === 0);
+  await page.evaluate(() => window.__readerApp.search.close());
+  await bars(page, false);
+  await page.evaluate(() => window.__readerApp.settings.update({ immersiveReading: false }));
+  await bars(page, true);
+  await delay(400);
+  const restored = await snapshot(page);
+  assert.equal(restored.keyboardOverlap, 0);
+  assert.equal(restored.webHeight, restored.hostHeight, 'Blank bottom space after IME dismissal');
+
+  const url = page.url();
+  const anchor = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
+  adb('shell', 'settings', 'put', 'system', 'user_rotation', '1');
+  await page.waitForFunction(() => innerWidth > innerHeight);
+  await delay(500);
+  assert.equal(page.url(), url, 'Rotation changed chapter');
+  const rotated = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
+  assert.equal(rotated.paragraph, anchor.paragraph);
+  await page.evaluate(() => window.__readerApp.tocView.open());
+  const safe = await snapshot(page);
+  const inputBounds = await page.locator('#toc-panel input').boundingBox();
+  assert.ok(inputBounds.x >= safe.left, 'TOC input enters landscape cutout');
+  await capture('landscape');
+  adb('shell', 'input', 'keyevent', '3');
   adb('shell', 'am', 'start', '-W', '-n', `${PKG}/.MainActivity`);
-  let socket;
-  for (let i = 0; i < 40; i++) {
-    const pid = adb('shell', 'pidof', PKG).split(' ')[0];
-    const sockets = adb('shell', 'cat', '/proc/net/unix');
-    socket = sockets.match(new RegExp(`@?(webview_devtools_remote_${pid})\\b`))?.[1];
-    if (socket) break;
-    await delay(250);
+  await bars(page, true);
+  assert.equal(page.url(), url, 'Resume reloaded chapter');
+
+  await writeFile(`${dir}/report.json`, JSON.stringify({
+    automated: 'PASS', device: adb('shell', 'getprop', 'ro.product.model'), sdk,
+    baseline, keyboard, title,
+    manualPending: ['Review full-screen screenshots for icon contrast/cutout appearance', 'Transient edge-swipe reveal', 'Repeat in gesture and three-button modes; remaining OS/device matrix', 'Cold-start launch surface'],
+  }, null, 2));
+  console.log(`Device assertions passed. Full-screen screenshots: ${dir}. Test book retained: ${title}`);
+} finally {
+  if (connection && originalSettings) {
+    await connection.page.evaluate(({ settings, raw }) => {
+      window.__readerApp.settings.replace(settings);
+      if (raw === null) localStorage.removeItem('reader.settings.v1');
+      else localStorage.setItem('reader.settings.v1', raw);
+    }, { settings: originalSettings, raw: rawSettings }).catch(() => {});
   }
-  assert.ok(socket, '找不到 WebView DevTools：确认安装的是 debug APK');
-  port = adb('forward', 'tcp:0', `localabstract:${socket}`);
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const page = browser.contexts()[0].pages().find((p) => p.url().startsWith('https://reader.local/'));
-  assert.ok(page, 'synthetic HTTPS 主文档未找到');
-  await page.waitForFunction(() => window.__readerApp && document.querySelector('#chapter-content p, .quick-card'), null, { timeout: 30000 });
-  return { browser, page };
-}
-
-async function run() {
-  console.log('[Android Edge-to-Edge 自动化显示测试]');
-  try {
-    adb('shell', 'am', 'force-stop', PKG);
-    const { browser, page } = await launch();
-
-    // 1. 验证 Bridge 与初始快照
-    const bridgeState = await page.evaluate(() => {
-      const bridge = window._nativeDisplayBridge;
-      if (!bridge) return { available: false };
-      const raw = bridge.getDisplaySnapshot();
-      const snap = raw ? JSON.parse(raw) : null;
-      const root = document.documentElement;
-      return {
-        available: true,
-        snapshot: snap,
-        cssSafeTop: getComputedStyle(root).getPropertyValue('--safe-top').trim(),
-        cssSafeBottom: getComputedStyle(root).getPropertyValue('--safe-bottom').trim(),
-      };
-    });
-
-    assert.ok(bridgeState.available, 'window._nativeDisplayBridge 未注入');
-    assert.ok(bridgeState.snapshot, '原生安全区快照为空');
-    console.log('  ✓ 原生 Bridge 与初始安全区快照有效:', bridgeState.snapshot);
-    console.log(`  ✓ CSS 安全区生效: top=${bridgeState.cssSafeTop}, bottom=${bridgeState.cssSafeBottom}`);
-
-    // 2. 验证主题切换与系统栏同步
-    console.log('\n[2] 验证主题切换通知原生');
-    for (const theme of ['light', 'paper', 'dark', 'black']) {
-      await page.evaluate((t) => {
-        window.__readerApp.settings.update({ theme: t });
-      }, theme);
-      await delay(100);
-      const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-      assert.equal(applied, theme, `主题 ${theme} 未生效`);
+  for (const [key, value] of [['user_rotation', rotation], ['accelerometer_rotation', autoRotation]]) {
+    if (value !== undefined) {
+      if (value === 'null') adb('shell', 'settings', 'delete', 'system', key);
+      else adb('shell', 'settings', 'put', 'system', key, value);
     }
-    console.log('  ✓ 亮色/纸张/暗色/纯黑主题切换已触发原生设置');
-
-    // 3. 打开章节并验证沉浸式切换与位置锚定
-    console.log('\n[3] 验证沉浸式切换与阅读位置锚定');
-    const continueBtn = page.locator('#continue-reading');
-    if (await continueBtn.isVisible()) {
-      await continueBtn.click();
-    }
-    await page.waitForSelector('#chapter-content p', { timeout: 30000 });
-    await page.evaluate(() => window.scrollTo(0, 1500));
-    await delay(350);
-
-    const posBefore = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
-    assert.ok(posBefore && posBefore.paragraph > 0, '未成功记录滚动位置');
-
-    // 开启沉浸式
-    await page.evaluate(() => window.__readerApp.settings.update({ immersiveReading: true }));
-    await delay(300);
-    const posAfterImmersive = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
-    assert.equal(posAfterImmersive.paragraph, posBefore.paragraph, '沉浸式切换后段落位置漂移');
-    console.log(`  ✓ 开启沉浸式保持同一段落: p${posBefore.paragraph}`);
-
-    // 退出沉浸式
-    await page.evaluate(() => window.__readerApp.settings.update({ immersiveReading: false }));
-    await delay(300);
-    const posAfterRestore = await page.evaluate(() => window.__readerApp.reader.lastKnownPosition);
-    assert.equal(posAfterRestore.paragraph, posBefore.paragraph, '退出沉浸式后段落位置漂移');
-    console.log(`  ✓ 退出沉浸式保持同一段落: p${posBefore.paragraph}`);
-
-    // 4. 截图保存
-    await page.screenshot({ path: 'artifacts/android-display-snapshot.png' });
-    await writeFile(
-      'artifacts/android-display-report.json',
-      JSON.stringify(
-        {
-          result: 'PASS',
-          origin: 'https://reader.local',
-          device: adb('shell', 'getprop', 'ro.product.model'),
-          androidVersion: adb('shell', 'getprop', 'ro.build.version.release'),
-          snapshot: bridgeState.snapshot,
-          theme: 'black',
-        },
-        null,
-        2,
-      ),
-    );
-    console.log('  ✓ 测试截图与报告已生成');
-    await browser.close();
-  } finally {
-    if (port) adb('forward', '--remove', `tcp:${port}`);
   }
+  await connection?.close();
 }
-
-run().catch((err) => {
-  console.error('测试失败:', err);
-  process.exit(1);
-});

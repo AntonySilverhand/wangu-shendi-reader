@@ -30,7 +30,7 @@
           var raw = localStorage.getItem('reader.settings.v1');
           var s = raw ? JSON.parse(raw) : null;
           var root = document.documentElement;
-          var theme = (s && s.theme) || 'light';
+          var theme = (s && s.theme) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
           if (theme === 'auto') theme = 'light';
           root.setAttribute('data-theme', theme);
           root.setAttribute('data-font', (s && s.font) || 'system');
@@ -65,6 +65,9 @@
             var raw = window._nativeDisplayBridge.getDisplaySnapshot();
             if (raw) {
               var snap = JSON.parse(raw);
+              if (snap.version !== 1 || !['top', 'bottom', 'left', 'right', 'ime'].every(function (k) {
+                return typeof snap[k] === 'number' && isFinite(snap[k]) && snap[k] >= 0 && snap[k] <= 10000;
+              })) return;
               var root = document.documentElement;
               if (snap.top != null) root.style.setProperty('--native-safe-top', snap.top + 'px');
               if (snap.bottom != null) root.style.setProperty('--native-safe-bottom', snap.bottom + 'px');
@@ -87,6 +90,8 @@
     </div>
     <div class="system-bar-scrim top" aria-hidden="true"></div>
     <div class="system-bar-scrim bottom" aria-hidden="true"></div>
+    <div class="system-bar-scrim left" aria-hidden="true"></div>
+    <div class="system-bar-scrim right" aria-hidden="true"></div>
     <div id="overlay-root"></div>
     <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
     <noscript>

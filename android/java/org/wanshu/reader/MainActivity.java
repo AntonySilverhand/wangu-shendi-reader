@@ -6,21 +6,16 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.ViewGroup;
+import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
 
 /**
- * 单 Activity：全屏 WebView，支持原生 Edge-to-Edge 与阅读主题同步。
- *
- * 页面 origin 固定为 https://reader.local/（由 AssetClient 拦截所有请求并从
- * APK assets 提供资源），不依赖随机端口。Web Storage / IndexedDB 按 origin 隔离，
- * 固定 origin 后阅读进度、书签、历史、设置、正文缓存、本地导入书均跨启动稳定。
- *
- * 生命周期：
- *  - configChanges 已声明（Manifest），旋转/折叠不重建 Activity，WebView 不重载；
- *  - 进程被杀/系统重建时，hash（路由 = 章节）经 savedInstanceState 恢复，
- *    阅读位置由固定 origin 下的 localStorage 恢复。
+ * 单 Activity：固定 https://reader.local/ origin，跨更新保持 Web Storage / IndexedDB。
+ * 系统栏由网页安全区处理；IME 由 DisplayLayout 唯一负责缩小 WebView。
+ * configChanges 不重载页面；系统重建时恢复路由，段落位置由个人存储恢复。
  */
 public class MainActivity extends Activity {
   private static final String APP_ORIGIN = "https://reader.local/";
@@ -30,24 +25,34 @@ public class MainActivity extends Activity {
   private static final String KEY_THEME_COLOR = "theme_color";
 
   private WebView webView;
-  private DisplaySnapshot latestSnapshot;
+  private DisplayLayout displayHost;
+  private WindowInsets lastInsets;
+  // Bridge getter runs off the UI thread: only read immutable, safely published data.
+  private volatile String snapshotJson = "{\"version\":1,\"top\":0,\"bottom\":0,\"left\":0,\"right\":0,\"ime\":0}";
+  private final DisplayRefreshRunnable refreshDisplay = new DisplayRefreshRunnable(this, false);
   private String currentThemeName = "dark";
   private String currentThemeColor = "#161719";
-  private boolean isImmersive = false;
-  private boolean pageReady = false;
+  private boolean isImmersive;
+  private boolean pageReady;
+  private boolean destroyed;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-
     SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-    currentThemeName = prefs.getString(KEY_THEME_NAME, "dark");
-    currentThemeColor = prefs.getString(KEY_THEME_COLOR, "#161719");
-
+    String defaultTheme = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+        == Configuration.UI_MODE_NIGHT_YES ? "dark" : "light";
+    currentThemeName = prefs.getString(KEY_THEME_NAME, defaultTheme);
+    currentThemeColor = DisplayHelper.themeColor(currentThemeName);
+    if (currentThemeColor == null) {
+      currentThemeName = "dark";
+      currentThemeColor = "#161719";
+    }
     DisplayHelper.configureWindow(this);
-    DisplayHelper.applyTheme(this, null, currentThemeName, currentThemeColor, isImmersive);
+    DisplayHelper.applyTheme(this, null, currentThemeName, currentThemeColor, false);
 
     webView = new WebView(this);
+    webView.setVisibility(View.INVISIBLE);
     WebSettings s = webView.getSettings();
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);
@@ -59,72 +64,96 @@ public class MainActivity extends Activity {
     s.setAllowContentAccess(false);
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setJavaScriptCanOpenWindowsAutomatically(false);
-
-    int initialColor = Color.parseColor("#101113");
-    try {
-      if (currentThemeColor != null && currentThemeColor.startsWith("#")) {
-        initialColor = Color.parseColor(currentThemeColor);
-      }
-    } catch (Exception ignored) {}
-    webView.setBackgroundColor(initialColor);
-
+    webView.setBackgroundColor(Color.parseColor(currentThemeColor));
     webView.setWebViewClient(new AssetClient(new AssetProvider(getAssets()), new SourceProxy()));
     webView.addJavascriptInterface(new NativeDisplayBridge(this), "_nativeDisplayBridge");
-    webView.setOnApplyWindowInsetsListener(new EdgeInsetsListener(this));
-
-    // 仅 DEBUG=1 构建开放本机 adb DevTools；发布 APK 不开放调试接口。
+    // 仅 DEBUG=1 APK 开放 adb DevTools。
     WebView.setWebContentsDebuggingEnabled(
         (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
-    setContentView(webView, new ViewGroup.LayoutParams(
+    displayHost = new DisplayLayout(this);
+    displayHost.setOnApplyWindowInsetsListener(new EdgeInsetsListener(this));
+    displayHost.addView(webView, new FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-    latestSnapshot = DisplayHelper.computeSnapshot(this, null, isImmersive);
-
-    String hash = null;
-    if (savedInstanceState != null) {
-      hash = savedInstanceState.getString(STATE_HASH);
-    }
+    setContentView(displayHost, new ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    recomputeAndDispatchInsets(null);
+    String hash = savedInstanceState == null ? null : savedInstanceState.getString(STATE_HASH);
     webView.loadUrl(hash != null && hash.startsWith("#") ? APP_ORIGIN + hash : APP_ORIGIN);
   }
 
   @Override
   public void onConfigurationChanged(Configuration newConfig) {
     super.onConfigurationChanged(newConfig);
-    recomputeAndDispatchInsets(null);
+    lastInsets = null;
+    scheduleDisplayRefresh();
+    if (displayHost != null) displayHost.requestApplyInsets();
   }
 
   public void onInsetsChanged(WindowInsets insets) {
+    lastInsets = insets;
     recomputeAndDispatchInsets(insets);
   }
 
+  public void scheduleDisplayRefresh() {
+    if (destroyed || displayHost == null) return;
+    displayHost.removeCallbacks(refreshDisplay);
+    displayHost.post(refreshDisplay);
+  }
+
+  public int displayHostHeight() { return displayHost == null ? 0 : displayHost.getHeight(); }
+  public int displayWebHeight() { return webView == null ? 0 : webView.getHeight(); }
+
+  public int resizeForKeyboard(int keyboardTop, boolean visible) {
+    if (displayHost == null || webView == null) return 0;
+    int[] location = new int[2];
+    displayHost.getLocationOnScreen(location);
+    int overlap = Math.min(displayHost.getHeight(), DisplayGeometry.keyboardOverlap(
+        location[1] + displayHost.getHeight(), keyboardTop, visible));
+    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) webView.getLayoutParams();
+    if (lp.bottomMargin != overlap) {
+      lp.bottomMargin = overlap;
+      webView.setLayoutParams(lp);
+    }
+    return overlap;
+  }
+
   public void recomputeAndDispatchInsets(WindowInsets insets) {
-    latestSnapshot = DisplayHelper.computeSnapshot(this, insets, isImmersive);
-    if (pageReady && webView != null) {
-      String script = "window.__onNativeDisplayChange && window.__onNativeDisplayChange("
-          + latestSnapshot.toJson() + ");";
-      webView.post(new PostInsetsRunnable(webView, script));
+    if (destroyed) return;
+    String next = DisplayHelper.computeSnapshot(this, insets != null ? insets : lastInsets, isImmersive).toJson();
+    if (next.equals(snapshotJson)) return;
+    snapshotJson = next;
+    dispatchSnapshot();
+  }
+
+  private void dispatchSnapshot() {
+    if (!destroyed && pageReady && webView != null) {
+      webView.evaluateJavascript("window.__onNativeDisplayChange && window.__onNativeDisplayChange("
+          + snapshotJson + ");", webView.getVisibility() == View.VISIBLE ? null : new DisplayReadyCallback(this));
     }
   }
 
-  public String getLatestSnapshotJson() {
-    if (latestSnapshot == null) {
-      latestSnapshot = DisplayHelper.computeSnapshot(this, null, isImmersive);
-    }
-    return latestSnapshot.toJson();
+  public void displayApplied() {
+    if (!destroyed && webView != null) webView.setVisibility(View.VISIBLE);
   }
+
+  public String getLatestSnapshotJson() { return snapshotJson; }
 
   public void onSetTheme(String themeName, String themeColorHex) {
     runOnUiThread(new SetThemeRunnable(this, themeName, themeColorHex));
   }
 
   public void applyThemeInternal(String themeName, String themeColorHex) {
-    this.currentThemeName = themeName != null ? themeName : "dark";
-    this.currentThemeColor = themeColorHex != null ? themeColorHex : "#161719";
+    String canonical = DisplayHelper.themeColor(themeName);
+    if (destroyed || canonical == null || !canonical.equalsIgnoreCase(themeColorHex)) return;
+    currentThemeName = themeName;
+    currentThemeColor = canonical;
     SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
-    editor.putString(KEY_THEME_NAME, this.currentThemeName);
-    editor.putString(KEY_THEME_COLOR, this.currentThemeColor);
+    editor.putString(KEY_THEME_NAME, currentThemeName);
+    editor.putString(KEY_THEME_COLOR, currentThemeColor);
     editor.apply();
-    DisplayHelper.applyTheme(this, webView, this.currentThemeName, this.currentThemeColor, isImmersive);
+    // 改图标颜色不能再次 hide()，否则会打断用户临时唤出的系统栏。
+    DisplayHelper.applyTheme(this, webView, currentThemeName, currentThemeColor, false);
+    scheduleDisplayRefresh();
   }
 
   public void onSetImmersive(boolean immersive) {
@@ -132,14 +161,22 @@ public class MainActivity extends Activity {
   }
 
   public void applyImmersiveInternal(boolean immersive) {
-    this.isImmersive = immersive;
+    if (destroyed || isImmersive == immersive) return;
+    isImmersive = immersive;
     DisplayHelper.applyImmersive(this, immersive);
-    recomputeAndDispatchInsets(null);
+    scheduleDisplayRefresh();
   }
 
   public void onPageReady() {
-    this.pageReady = true;
+    runOnUiThread(new DisplayRefreshRunnable(this, true));
+  }
+
+  public void pageReadyInternal() {
+    if (destroyed) return;
+    pageReady = true;
     recomputeAndDispatchInsets(null);
+    dispatchSnapshot(); // 握手重放最新快照，不能依赖首次 inset 事件的时序。
+    if (displayHost != null) displayHost.requestApplyInsets();
   }
 
   @Override
@@ -164,21 +201,24 @@ public class MainActivity extends Activity {
     super.onResume();
     if (webView != null) webView.onResume();
     DisplayHelper.applyTheme(this, webView, currentThemeName, currentThemeColor, isImmersive);
-    recomputeAndDispatchInsets(null);
+    if (displayHost != null) displayHost.requestApplyInsets();
+    scheduleDisplayRefresh();
   }
 
   @Override
   public void onBackPressed() {
-    if (webView != null && webView.canGoBack()) {
-      webView.goBack();
-    } else {
-      super.onBackPressed();
-    }
+    if (webView != null && webView.canGoBack()) webView.goBack();
+    else super.onBackPressed();
   }
 
   @Override
   protected void onDestroy() {
-    if (webView != null) webView.destroy();
+    destroyed = true;
+    if (displayHost != null) displayHost.removeCallbacks(refreshDisplay);
+    if (webView != null) {
+      webView.removeJavascriptInterface("_nativeDisplayBridge");
+      webView.destroy();
+    }
     super.onDestroy();
   }
 }

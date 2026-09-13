@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   initNativeDisplay,
+  parseDisplaySnapshot,
   applyDisplaySnapshot,
   getLatestSnapshot,
   onNativeInsetsChange,
@@ -113,6 +114,31 @@ describe('Android Native Display Adapter & Inset Contract', () => {
     expect(attrs.get('data-native-immersive')).toBeUndefined();
   });
 
+  it('拒绝损坏或未知版本的快照', () => {
+    const valid = { version: 1, top: 0, bottom: 24, left: 0, right: 0, ime: 0 };
+    expect(parseDisplaySnapshot(JSON.stringify(valid))).toEqual(valid);
+    for (const bad of [null, '{', { ...valid, version: 2 }, { ...valid, left: -1 },
+      { ...valid, top: Infinity }, { ...valid, ime: '300' }, { ...valid, bottom: NaN }]) {
+      expect(parseDisplaySnapshot(bad)).toBeNull();
+    }
+  });
+
+  it('相同安全区或仅键盘变化不重复触发阅读重锚定', () => {
+    initNativeDisplay();
+    const fn = vi.fn();
+    const unsub = onNativeInsetsChange(fn);
+    const emit = mockWindow.__onNativeDisplayChange as (data: unknown) => void;
+    const snap = { version: 1, top: 31, bottom: 21, left: 0, right: 0, ime: 0 };
+    emit(snap);
+    expect(fn).toHaveBeenCalledTimes(1);
+    emit({ ...snap });
+    emit({ ...snap, ime: 300 });
+    emit({ ...snap, version: 9 });
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(styleProps.get('--native-ime')).toBe('300px');
+    unsub();
+  });
+
   it('原生 Bridge 注入时完成初始化握手并接收事件', () => {
     const mockBridge = {
       getDisplaySnapshot: vi.fn(() =>
@@ -171,5 +197,7 @@ describe('Android Native Display Adapter & Inset Contract', () => {
 
     setNativeImmersive(true);
     expect(mockBridge.setImmersive).toHaveBeenCalledWith(true);
+    setNativeImmersive(true);
+    expect(mockBridge.setImmersive).toHaveBeenCalledTimes(1);
   });
 });

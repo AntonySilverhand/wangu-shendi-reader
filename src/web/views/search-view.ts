@@ -83,6 +83,7 @@ export class ChapterSearch {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = null;
     this.openState = false;
+    this.input.blur();
     this.element.classList.remove('open');
     this.opts.onOpenChange?.(false);
     this.clearMarks();

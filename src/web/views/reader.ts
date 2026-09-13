@@ -297,13 +297,19 @@ export class ReaderView {
     requestAnimationFrame(() => this.restorePosition(pos));
   }
 
-  /** 安全区域/系统栏尺寸变化后保持当前阅读位置（段落 + 字符偏移） */
+  private insetsFrame = 0;
+
+  /** 合并同一布局周期的 inset 更新；编辑中不抢走输入框的滚动位置。 */
   onInsetsChanged(): void {
+    cancelAnimationFrame(this.insetsFrame);
+    const editing = () => document.activeElement?.matches('input, textarea, select, [contenteditable="true"]');
     const pos = this.lastPosition;
-    if (!pos) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!this.suppressRestore) this.restorePosition(pos);
+    const chapter = this.current;
+    if (!pos || this.suppressRestore || editing()) return;
+    this.insetsFrame = requestAnimationFrame(() => {
+      this.insetsFrame = requestAnimationFrame(() => {
+        this.insetsFrame = 0;
+        if (this.current === chapter && !this.suppressRestore && !editing()) this.restorePosition(pos);
       });
     });
   }

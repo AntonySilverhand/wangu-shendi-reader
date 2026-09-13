@@ -8,7 +8,8 @@ import { ChapterSearch } from './views/search-view.ts';
 import { renderHome } from './views/home-view.ts';
 import { openSettingsSheet, openDataSheet, openDownloadSheet, openAboutSheet, type SettingsDeps } from './views/settings-view.ts';
 import { openBookmarksSheet } from './views/bookmarks-view.ts';
-import { closeActiveSheet, hasActiveSheet, type SheetHandle } from './ui/sheet.ts';
+import { closeActiveSheet, hasActiveSheet } from './ui/sheet.ts';
+import { hasBlockingOverlay, onOverlayChange } from './ui/overlay-state.ts';
 import { showToast, confirmDialog } from './ui/toast.ts';
 import { SettingsStore, applySettings } from './store/settings.ts';
 import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } from './native-display.ts';
@@ -50,7 +51,6 @@ export class App {
   private prefetchController: AbortController | null = null;
   private wakeLock: { release: () => Promise<void> } | null = null;
   private installPrompt: { prompt: () => Promise<void> } | null = null;
-  private activeSheetCount = 0;
   private searchOpen = false;
   private disposed = false;
 
@@ -74,6 +74,7 @@ export class App {
       onModeChange: (mode, prev) => {
         // 回到 compact：目录抽屉必须收起（否则覆盖整屏）
         if (mode === 'compact') this.tocView.close();
+        this.syncImmersive();
         // 模式切换后布局稳定时恢复阅读位置（段落锚点不依赖像素）
         if (prev !== mode && this.view === 'reader') {
           requestAnimationFrame(() => {
@@ -102,6 +103,7 @@ export class App {
       },
       onOpenTocData: () => this.openData(),
       getCurrentChapterId: () => this.currentChapterId,
+      onOpenChange: () => this.syncImmersive(),
     });
     this.search = new ChapterSearch({
       onOpenChange: (open) => {
@@ -322,8 +324,13 @@ export class App {
       this.installPrompt = event as unknown as { prompt: () => Promise<void> };
     });
     onNativeInsetsChange(() => {
-      this.reader.onInsetsChanged();
+      if (this.view === 'reader') this.reader.onInsetsChanged();
     });
+    onOverlayChange(() => this.syncImmersive());
+    // 焦点切换在同一任务结束后合并，避免输入框之间切换时系统栏闪动。
+    const syncFocus = () => queueMicrotask(() => this.syncImmersive());
+    on(document, 'focusin', syncFocus);
+    on(document, 'focusout', syncFocus);
     history.scrollRestoration = 'manual';
     this.updateNetStatus();
   }
@@ -843,55 +850,39 @@ export class App {
     const shouldImmersive =
       this.view === 'reader' &&
       this.settings.get().immersiveReading &&
-      this.activeSheetCount === 0 &&
+      !hasBlockingOverlay() &&
+      !(this.layout.current === 'compact' && this.tocView.isOpen()) &&
+      !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]') &&
       !this.searchOpen;
     setNativeImmersive(shouldImmersive);
   }
 
-  private trackSheet(handle: SheetHandle): SheetHandle {
-    this.activeSheetCount++;
-    this.syncImmersive();
-    const originalClose = handle.close.bind(handle);
-    let closed = false;
-    handle.close = () => {
-      if (!closed) {
-        closed = true;
-        this.activeSheetCount = Math.max(0, this.activeSheetCount - 1);
-        this.syncImmersive();
-      }
-      originalClose();
-    };
-    return handle;
-  }
-
   private openSettings(): void {
-    this.trackSheet(openSettingsSheet(this.settingsDeps()));
+    openSettingsSheet(this.settingsDeps());
   }
 
   private openData(): void {
-    this.trackSheet(openDataSheet(this.settingsDeps()));
+    openDataSheet(this.settingsDeps());
   }
 
   private openDownload(): void {
-    this.trackSheet(openDownloadSheet(this.settingsDeps()));
+    openDownloadSheet(this.settingsDeps());
   }
 
   private openAbout(): void {
-    this.trackSheet(openAboutSheet(this.settingsDeps()));
+    openAboutSheet(this.settingsDeps());
   }
 
   private openBookmarks(): void {
-    this.trackSheet(
-      openBookmarksSheet({
-        personal: this.personal,
-        bookId: this.bookId,
-        onJump: (bookmark: Bookmark) => {
-          void this.openChapter(bookmark.chapterId, {
-            anchor: { paragraph: bookmark.paragraph, offset: bookmark.offset },
-          });
-        },
-      }),
-    );
+    openBookmarksSheet({
+      personal: this.personal,
+      bookId: this.bookId,
+      onJump: (bookmark: Bookmark) => {
+        void this.openChapter(bookmark.chapterId, {
+          anchor: { paragraph: bookmark.paragraph, offset: bookmark.offset },
+        });
+      },
+    });
   }
 
   /* ---------------------------- TXT 导入/导出 ---------------------------- */
@@ -970,6 +961,7 @@ export class App {
       },
       onOpenTocData: () => this.openData(),
       getCurrentChapterId: () => this.currentChapterId,
+      onOpenChange: () => this.syncImmersive(),
     });
     const oldPanel = document.getElementById('toc-panel');
     oldPanel?.replaceWith(this.tocView.panel);

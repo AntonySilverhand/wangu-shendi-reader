@@ -1,4 +1,5 @@
 import { el, icon, iconButton } from '../dom.ts';
+import { beginOverlay } from './overlay-state.ts';
 
 export interface SheetOptions {
   title: string;
@@ -20,6 +21,7 @@ export interface SheetHandle {
 let active: SheetHandle | null = null;
 
 export function openSheet(opts: SheetOptions): SheetHandle {
+  const endOverlay = beginOverlay();
   active?.close();
   const root = document.getElementById('overlay-root') ?? document.body;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -103,9 +105,11 @@ export function openSheet(opts: SheetOptions): SheetHandle {
       };
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) remove();
       else setTimeout(remove, 260);
-      previouslyFocused?.focus?.();
+      if (sheet.contains(document.activeElement)) (document.activeElement as HTMLElement)?.blur();
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
       opts.onClose?.();
       if (active === handle) active = null;
+      endOverlay();
     },
   };
 

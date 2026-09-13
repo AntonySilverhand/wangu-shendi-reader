@@ -731,6 +731,8 @@ button {
   flex-direction: column;
   padding-top: var(--safe-top);
   padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
   box-shadow: var(--shadow);
 }
 .toc-panel.open {
@@ -895,7 +897,7 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: min(86dvh, 720px);
+  max-height: min(86dvh, 720px, calc(100dvh - var(--safe-top)));
   background: var(--bg-elevated);
   border-radius: 18px 18px 0 0;
   border: 1px solid var(--border);
@@ -914,12 +916,13 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
 }
 @media (min-width: 720px) {
   .sheet {
-    left: 50%;
-    bottom: 50%;
+    left: calc((100% + var(--safe-left) - var(--safe-right)) / 2);
+    bottom: calc((100% + var(--safe-bottom) - var(--safe-top)) / 2);
     right: auto;
     transform: translate(-50%, calc(50% + 24px));
-    width: min(560px, calc(100vw - 40px));
-    max-height: min(82dvh, 700px);
+    width: min(560px, calc(100vw - var(--safe-left) - var(--safe-right) - 40px));
+    max-height: min(82dvh, 700px, calc(100dvh - var(--safe-top) - var(--safe-bottom) - 20px));
+    padding-inline: 0;
     border-radius: 18px;
     border-bottom: 1px solid var(--border);
     opacity: 0;
@@ -1175,9 +1178,9 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
   position: fixed;
   z-index: 62;
   top: calc(var(--topbar-h) + var(--safe-top) + 6px);
-  left: 50%;
+  left: calc((100% + var(--safe-left) - var(--safe-right)) / 2);
   transform: translateX(-50%);
-  width: min(560px, calc(100vw - 20px));
+  width: min(560px, calc(100vw - var(--safe-left) - var(--safe-right) - 20px));
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1215,8 +1218,9 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
 #toast-root {
   position: fixed;
   z-index: 90;
-  left: 50%;
   bottom: calc(76px + var(--safe-bottom));
+  left: calc((100% + var(--safe-left) - var(--safe-right)) / 2);
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 20px);
   transform: translateX(-50%);
   display: grid;
   gap: 8px;
@@ -1244,7 +1248,8 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
   position: fixed;
   z-index: 55;
   top: calc(var(--topbar-h) + var(--safe-top) + 6px);
-  left: 50%;
+  left: calc((100% + var(--safe-left) - var(--safe-right)) / 2);
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 20px);
   transform: translateX(-50%);
   background: var(--bg-elevated);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
@@ -1369,7 +1374,7 @@ html[data-layout='wide'] .app[data-view='reader'] {
   gap: clamp(16px, 2vw, 36px);
   max-width: 1600px;
   margin-inline: auto;
-  padding-inline: 20px;
+  padding-inline: max(20px, var(--safe-left)) max(20px, var(--safe-right));
   align-items: start;
 }
 html[data-layout='wide'] .app[data-view='reader'][data-toc='open'] {
@@ -1386,18 +1391,20 @@ html[data-layout='wide'] .app[data-view='reader'] .toc-panel {
   grid-row: 1;
   position: sticky;
   inset: auto;
-  top: var(--topbar-h);
+  top: calc(var(--topbar-h) + var(--safe-top));
   width: 100%;
-  height: calc(100dvh - var(--topbar-h));
+  height: calc(100dvh - var(--topbar-h) - var(--safe-top));
+  /* Grid 外层已避让左右边缘。 */
+  padding-inline: 0;
 }
 html[data-layout='wide'] .app[data-view='reader'] .side-rail {
   grid-column: 3;
   grid-row: 1;
   position: sticky;
   inset: auto;
-  top: calc(var(--topbar-h) + 28px);
+  top: calc(var(--topbar-h) + var(--safe-top) + 28px);
   width: 100%;
-  margin-top: calc(var(--topbar-h) + 28px);
+  margin-top: calc(var(--topbar-h) + var(--safe-top) + 28px);
 }
 
 /* medium：主页两列（书卡 + 快捷入口，≥1100 才重排） */
@@ -1457,7 +1464,19 @@ html[data-layout='wide'] .home-local { grid-column: 2 / -1; grid-row: 3; }
 .app[data-view="reader"][data-bars="hidden"] ~ .system-bar-scrim {
   opacity: 1;
 }
-html[data-native-immersive="true"] .system-bar-scrim {
-  display: none !important;
+/* 沉浸时仍保护刘海；临时唤出系统栏时由实际可见 inset 决定衬底尺寸。 */
+.system-bar-scrim.left {
+  top: 0;
+  bottom: 0;
+  right: auto;
+  width: var(--safe-left);
+  background: var(--bg);
+}
+.system-bar-scrim.right {
+  top: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--safe-right);
+  background: var(--bg);
 }
 

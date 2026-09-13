@@ -3,6 +3,8 @@ package org.wanshu.reader;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.view.DisplayCutout;
 import android.view.View;
@@ -17,6 +19,15 @@ import android.webkit.WebView;
  */
 public final class DisplayHelper {
   private DisplayHelper() {}
+
+  public static String themeColor(String theme) {
+    if ("light".equals(theme)) return "#f6f5f2";
+    if ("dark".equals(theme)) return "#161719";
+    if ("black".equals(theme)) return "#000000";
+    if ("eink".equals(theme)) return "#ededed";
+    if ("paper".equals(theme)) return "#f5edda";
+    return null;
+  }
 
   public static void configureWindow(Activity activity) {
     Window window = activity.getWindow();
@@ -135,38 +146,47 @@ public final class DisplayHelper {
     }
   }
 
-  public static DisplaySnapshot computeSnapshot(Activity activity, WindowInsets insets,
+  public static DisplaySnapshot computeSnapshot(MainActivity activity, WindowInsets insets,
       boolean isImmersive) {
     float density = activity.getResources().getDisplayMetrics().density;
-    if (density <= 0f) {
-      density = 1.0f;
+    if (density <= 0f) density = 1f;
+    View decor = activity.getWindow().getDecorView();
+    if (insets == null) insets = decor.getRootWindowInsets();
+    Rect visible = new Rect();
+    decor.getWindowVisibleDisplayFrame(visible);
+    int[] decorLocation = new int[2];
+    decor.getLocationOnScreen(decorLocation);
+    int windowHeight = decor.getHeight();
+    int windowBottom = decorLocation[1] + windowHeight;
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      Rect bounds = activity.getWindowManager().getCurrentWindowMetrics().getBounds();
+      windowBottom = bounds.bottom;
+      windowHeight = bounds.height();
     }
 
-    if (insets == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      insets = activity.getWindow().getDecorView().getRootWindowInsets();
-    }
-
-    int top = 0;
-    int bottom = 0;
-    int left = 0;
-    int right = 0;
-    int ime = 0;
-
+    int top = 0, bottom = 0, left = 0, right = 0, ime = 0;
+    boolean statusVisible = false, navigationVisible = false;
     if (insets != null) {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
         Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
-        Insets imeInsets = insets.getInsets(WindowInsets.Type.ime());
         top = Math.max(bars.top, cutout.top);
         bottom = Math.max(bars.bottom, cutout.bottom);
         left = Math.max(bars.left, cutout.left);
         right = Math.max(bars.right, cutout.right);
-        ime = imeInsets.bottom;
+        ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
+        statusVisible = insets.isVisible(WindowInsets.Type.statusBars());
+        navigationVisible = insets.isVisible(WindowInsets.Type.navigationBars());
       } else {
         top = insets.getSystemWindowInsetTop();
-        bottom = insets.getSystemWindowInsetBottom();
         left = insets.getSystemWindowInsetLeft();
         right = insets.getSystemWindowInsetRight();
+        int systemBottom = insets.getSystemWindowInsetBottom();
+        ime = DisplayGeometry.legacyIme(systemBottom, insets.getStableInsetBottom(),
+            Math.max(0, windowBottom - visible.bottom), density);
+        bottom = DisplayGeometry.legacyNavigation(systemBottom, insets.getStableInsetBottom(), ime);
+        statusVisible = top > 0;
+        navigationVisible = bottom > 0 || left > 0 || right > 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           DisplayCutout cutout = insets.getDisplayCutout();
           if (cutout != null) {
@@ -178,13 +198,30 @@ public final class DisplayHelper {
         }
       }
     }
-
-    float topCss = Math.round((top / density) * 100.0f) / 100.0f;
-    float bottomCss = Math.round((bottom / density) * 100.0f) / 100.0f;
-    float leftCss = Math.round((left / density) * 100.0f) / 100.0f;
-    float rightCss = Math.round((right / density) * 100.0f) / 100.0f;
-    float imeCss = Math.round((ime / density) * 100.0f) / 100.0f;
-
-    return new DisplaySnapshot(1, topCss, bottomCss, leftCss, rightCss, imeCss, density, isImmersive);
+    // 现代 Android 使用窗口坐标；旧版使用可见矩形，兼容系统已经 adjustResize 的情况。
+    int keyboardTop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        ? windowBottom - ime : visible.bottom;
+    int overlap = activity.resizeForKeyboard(keyboardTop, ime > 0);
+    // WebView 已截止到键盘上沿，导航栏在键盘下面，不能再添加一次底部安全区。
+    if (ime > 0) bottom = 0;
+    // 设备验证读取实际窗口 appearance，不只检查 JS 是否发送过主题命令。
+    int appearance = 0;
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      WindowInsetsController c = activity.getWindow().getInsetsController();
+      int flags = c == null ? 0 : c.getSystemBarsAppearance();
+      if ((flags & WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS) != 0) appearance |= 1;
+      if ((flags & WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS) != 0) appearance |= 2;
+    } else {
+      int flags = decor.getSystemUiVisibility();
+      if ((flags & View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR) != 0) appearance |= 1;
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+          && (flags & View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) != 0) appearance |= 2;
+    }
+    int background = decor.getBackground() instanceof ColorDrawable
+        ? ((ColorDrawable) decor.getBackground()).getColor() : Color.BLACK;
+    String backgroundHex = String.format(java.util.Locale.ROOT, "#%06x", background & 0xffffff);
+    return new DisplaySnapshot(top / density, bottom / density, left / density, right / density,
+        ime / density, density, isImmersive, statusVisible, navigationVisible, overlap,
+        activity.displayHostHeight(), activity.displayWebHeight(), windowHeight, appearance, backgroundHex);
   }
 }

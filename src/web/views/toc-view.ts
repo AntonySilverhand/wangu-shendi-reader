@@ -24,6 +24,7 @@ export interface TocViewOptions {
   store: TocStore;
   onOpenChapter: (chapterId: string) => void;
   onOpenTocData?: () => void;
+  onOpenChange?: () => void;
   getCurrentChapterId: () => string | null;
 }
 
@@ -171,6 +172,7 @@ export class TocView {
     this.openState = true;
     this.panel.classList.add('open');
     document.getElementById('app')?.setAttribute('data-toc', 'open');
+    this.opts.onOpenChange?.();
     this.updateFooter();
     this.renderList(true);
     requestAnimationFrame(() => this.scrollToCurrent());
@@ -190,6 +192,7 @@ export class TocView {
     document.getElementById('app')?.setAttribute('data-toc', 'closed');
     // 关闭目录 = 取消搜索（含 debounce 期）：旧任务不得继续控制 UI / 占用网络
     this.search.cancel();
+    this.opts.onOpenChange?.();
   }
 
   toggle(): void {

@@ -1,21 +1,15 @@
 package org.wanshu.reader;
 
-/**
- * 屏幕/系统栏安全区域快照（不可变数据容器，顶层类，禁止内部类/lambda）。
- */
+/** 不可变显示快照。可见性取实际 WindowInsets，不把请求沉浸等同于已隐藏。 */
 public final class DisplaySnapshot {
-  public final int version;
-  public final float top;
-  public final float bottom;
-  public final float left;
-  public final float right;
-  public final float ime;
-  public final float density;
-  public final boolean immersive;
+  public final float top, bottom, left, right, ime, density;
+  public final boolean immersive, statusVisible, navigationVisible;
+  public final int keyboardOverlap, hostHeight, webHeight, windowHeight, appearance;
+  public final String backgroundColor;
 
-  public DisplaySnapshot(int version, float top, float bottom, float left, float right,
-      float ime, float density, boolean immersive) {
-    this.version = version;
+  public DisplaySnapshot(float top, float bottom, float left, float right, float ime,
+      float density, boolean immersive, boolean statusVisible, boolean navigationVisible,
+      int keyboardOverlap, int hostHeight, int webHeight, int windowHeight, int appearance, String backgroundColor) {
     this.top = top;
     this.bottom = bottom;
     this.left = left;
@@ -23,17 +17,23 @@ public final class DisplaySnapshot {
     this.ime = ime;
     this.density = density;
     this.immersive = immersive;
+    this.statusVisible = statusVisible;
+    this.navigationVisible = navigationVisible;
+    this.keyboardOverlap = keyboardOverlap;
+    this.hostHeight = hostHeight;
+    this.webHeight = webHeight;
+    this.windowHeight = windowHeight;
+    this.appearance = appearance;
+    this.backgroundColor = backgroundColor;
   }
 
   public String toJson() {
-    return "{\"version\":" + version
-        + ",\"top\":" + top
-        + ",\"bottom\":" + bottom
-        + ",\"left\":" + left
-        + ",\"right\":" + right
-        + ",\"ime\":" + ime
-        + ",\"density\":" + density
-        + ",\"immersive\":" + (immersive ? "true" : "false")
-        + "}";
+    return "{\"version\":1,\"top\":" + top + ",\"bottom\":" + bottom
+        + ",\"left\":" + left + ",\"right\":" + right + ",\"ime\":" + ime
+        + ",\"density\":" + density + ",\"immersive\":" + immersive
+        + ",\"statusVisible\":" + statusVisible + ",\"navigationVisible\":" + navigationVisible
+        + ",\"keyboardOverlap\":" + keyboardOverlap + ",\"hostHeight\":" + hostHeight
+        + ",\"webHeight\":" + webHeight + ",\"windowHeight\":" + windowHeight
+        + ",\"appearance\":" + appearance + ",\"backgroundColor\":\"" + backgroundColor + "\"}";
   }
 }

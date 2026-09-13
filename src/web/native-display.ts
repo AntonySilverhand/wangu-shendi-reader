@@ -33,6 +33,22 @@ declare global {
 }
 
 let latestSnapshot: NativeDisplaySnapshot | null = null;
+let lastImmersive: boolean | undefined;
+
+/** 不让损坏/未来版本的快照污染 CSS；0 是有效安全区，不回退到 env()。 */
+export function parseDisplaySnapshot(data: unknown): NativeDisplaySnapshot | null {
+  try {
+    const s = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!s || typeof s !== 'object' || s.version !== 1) return null;
+    for (const key of ['top', 'bottom', 'left', 'right', 'ime']) {
+      if (typeof s[key] !== 'number' || !Number.isFinite(s[key]) || s[key] < 0 || s[key] > 10000) return null;
+    }
+    if (s.immersive !== undefined && typeof s.immersive !== 'boolean') return null;
+    return { ...s };
+  } catch {
+    return null;
+  }
+}
 const listeners = new Set<InsetsListener>();
 
 export function isNativeDisplayAvailable(): boolean {
@@ -40,6 +56,9 @@ export function isNativeDisplayAvailable(): boolean {
 }
 
 export function applyDisplaySnapshot(snap: NativeDisplaySnapshot): void {
+  const valid = parseDisplaySnapshot(snap);
+  if (!valid) return;
+  snap = valid;
   latestSnapshot = snap;
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
@@ -77,7 +96,9 @@ export function syncNativeTheme(themeName: string, themeColorHex: string): void 
 export function setNativeImmersive(immersive: boolean): void {
   if (isNativeDisplayAvailable()) {
     try {
+      if (lastImmersive === immersive) return;
       window._nativeDisplayBridge?.setImmersive(immersive);
+      lastImmersive = immersive;
     } catch {
       /* 忽略桥接异常 */
     }
@@ -85,11 +106,18 @@ export function setNativeImmersive(immersive: boolean): void {
 }
 
 export function initNativeDisplay(): void {
+  lastImmersive = undefined;
   // 注册原生回调
   window.__onNativeDisplayChange = (data: string | NativeDisplaySnapshot) => {
     try {
-      const snap: NativeDisplaySnapshot = typeof data === 'string' ? JSON.parse(data) : data;
+      const snap = parseDisplaySnapshot(data);
+      if (!snap) return;
+      const prev = latestSnapshot;
+      const geometryChanged = !prev || prev.top !== snap.top || prev.bottom !== snap.bottom
+        || prev.left !== snap.left || prev.right !== snap.right;
       applyDisplaySnapshot(snap);
+      // IME/主题/请求态变化不等于安全区变化；避免无意义重锚定和滚动跳动。
+      if (!geometryChanged) return;
       for (const fn of listeners) {
         try {
           fn(snap);
@@ -107,8 +135,8 @@ export function initNativeDisplay(): void {
     try {
       const raw = window._nativeDisplayBridge?.getDisplaySnapshot();
       if (raw) {
-        const snap: NativeDisplaySnapshot = JSON.parse(raw);
-        applyDisplaySnapshot(snap);
+        const snap = parseDisplaySnapshot(raw);
+        if (snap) applyDisplaySnapshot(snap);
       }
       window._nativeDisplayBridge?.onPageReady();
     } catch {

@@ -1,4 +1,5 @@
 import { el } from '../dom.ts';
+import { beginOverlay } from './overlay-state.ts';
 
 let toastRoot: HTMLElement | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,6 +23,7 @@ export function showToast(text: string, ms = 2200): void {
 
 export function confirmDialog(message: string, confirmLabel = '确定'): Promise<boolean> {
   return new Promise((resolve) => {
+    const endOverlay = beginOverlay();
     const root = document.getElementById('overlay-root') ?? document.body;
     const backdrop = el('div', { class: 'sheet-backdrop show' });
     const okBtn = el(
@@ -49,6 +51,7 @@ export function confirmDialog(message: string, confirmLabel = '确定'): Promise
       backdrop.remove();
       dialog.remove();
       document.removeEventListener('keydown', onKey, true);
+      endOverlay();
       resolve(value);
     };
     const onKey = (e: KeyboardEvent) => {
