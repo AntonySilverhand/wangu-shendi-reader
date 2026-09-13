@@ -8,9 +8,10 @@ import { ChapterSearch } from './views/search-view.ts';
 import { renderHome } from './views/home-view.ts';
 import { openSettingsSheet, openDataSheet, openDownloadSheet, openAboutSheet, type SettingsDeps } from './views/settings-view.ts';
 import { openBookmarksSheet } from './views/bookmarks-view.ts';
-import { closeActiveSheet, hasActiveSheet } from './ui/sheet.ts';
+import { closeActiveSheet, hasActiveSheet, type SheetHandle } from './ui/sheet.ts';
 import { showToast, confirmDialog } from './ui/toast.ts';
 import { SettingsStore, applySettings } from './store/settings.ts';
+import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } from './native-display.ts';
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
@@ -49,6 +50,8 @@ export class App {
   private prefetchController: AbortController | null = null;
   private wakeLock: { release: () => Promise<void> } | null = null;
   private installPrompt: { prompt: () => Promise<void> } | null = null;
+  private activeSheetCount = 0;
+  private searchOpen = false;
   private disposed = false;
 
   private appEl!: HTMLElement;
@@ -104,6 +107,8 @@ export class App {
       onOpenChange: (open) => {
         this.reader.setSearchOpen(open);
         if (!open) this.reader.showBars();
+        this.searchOpen = open;
+        this.syncImmersive();
       },
     });
   }
@@ -147,6 +152,7 @@ export class App {
       this.settings.subscribe(() => {
         this.reader.refreshLayout();
         this.updateWakeLock();
+        this.syncImmersive();
       });
     } catch (err) {
       // 初始化失败（如 IndexedDB 不可用）不应阻止基本阅读
@@ -315,6 +321,9 @@ export class App {
       event.preventDefault();
       this.installPrompt = event as unknown as { prompt: () => Promise<void> };
     });
+    onNativeInsetsChange(() => {
+      this.reader.onInsetsChanged();
+    });
     history.scrollRestoration = 'manual';
     this.updateNetStatus();
   }
@@ -430,6 +439,7 @@ export class App {
     this.appEl.dataset.view = view;
     this.homeContainer.hidden = view !== 'home';
     this.updateWakeLock();
+    this.syncImmersive();
   }
 
   private showHome(): void {
@@ -828,32 +838,60 @@ export class App {
     };
   }
 
+  private syncImmersive(): void {
+    if (!isNativeDisplayAvailable()) return;
+    const shouldImmersive =
+      this.view === 'reader' &&
+      this.settings.get().immersiveReading &&
+      this.activeSheetCount === 0 &&
+      !this.searchOpen;
+    setNativeImmersive(shouldImmersive);
+  }
+
+  private trackSheet(handle: SheetHandle): SheetHandle {
+    this.activeSheetCount++;
+    this.syncImmersive();
+    const originalClose = handle.close.bind(handle);
+    let closed = false;
+    handle.close = () => {
+      if (!closed) {
+        closed = true;
+        this.activeSheetCount = Math.max(0, this.activeSheetCount - 1);
+        this.syncImmersive();
+      }
+      originalClose();
+    };
+    return handle;
+  }
+
   private openSettings(): void {
-    openSettingsSheet(this.settingsDeps());
+    this.trackSheet(openSettingsSheet(this.settingsDeps()));
   }
 
   private openData(): void {
-    openDataSheet(this.settingsDeps());
+    this.trackSheet(openDataSheet(this.settingsDeps()));
   }
 
   private openDownload(): void {
-    openDownloadSheet(this.settingsDeps());
+    this.trackSheet(openDownloadSheet(this.settingsDeps()));
   }
 
   private openAbout(): void {
-    openAboutSheet(this.settingsDeps());
+    this.trackSheet(openAboutSheet(this.settingsDeps()));
   }
 
   private openBookmarks(): void {
-    openBookmarksSheet({
-      personal: this.personal,
-      bookId: this.bookId,
-      onJump: (bookmark: Bookmark) => {
-        void this.openChapter(bookmark.chapterId, {
-          anchor: { paragraph: bookmark.paragraph, offset: bookmark.offset },
-        });
-      },
-    });
+    this.trackSheet(
+      openBookmarksSheet({
+        personal: this.personal,
+        bookId: this.bookId,
+        onJump: (bookmark: Bookmark) => {
+          void this.openChapter(bookmark.chapterId, {
+            anchor: { paragraph: bookmark.paragraph, offset: bookmark.offset },
+          });
+        },
+      }),
+    );
   }
 
   /* ---------------------------- TXT 导入/导出 ---------------------------- */

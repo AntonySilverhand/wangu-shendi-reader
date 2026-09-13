@@ -297,6 +297,17 @@ export class ReaderView {
     requestAnimationFrame(() => this.restorePosition(pos));
   }
 
+  /** 安全区域/系统栏尺寸变化后保持当前阅读位置（段落 + 字符偏移） */
+  onInsetsChanged(): void {
+    const pos = this.lastPosition;
+    if (!pos) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!this.suppressRestore) this.restorePosition(pos);
+      });
+    });
+  }
+
   private paragraphs(): HTMLElement[] {
     return Array.from(this.contentEl.children) as HTMLElement[];
   }

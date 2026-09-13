@@ -1,4 +1,5 @@
 /** 阅读设置：持久化到 localStorage，并立即应用到文档根节点。 */
+import { syncNativeTheme } from '../native-display.ts';
 
 export type ThemeName = 'light' | 'dark' | 'black' | 'eink' | 'paper';
 export type FontName = 'system' | 'hei' | 'serif' | 'kai';
@@ -20,6 +21,7 @@ export interface Settings {
   autoHideBars: boolean;
   prefetch: boolean;
   keepScreenAwake: boolean;
+  immersiveReading: boolean;
 }
 
 export const SETTINGS_KEY = 'reader.settings.v1';
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoHideBars: true,
   prefetch: true,
   keepScreenAwake: false,
+  immersiveReading: false,
 };
 
 export function clamp(n: number, min: number, max: number): number {
@@ -88,6 +91,7 @@ function sanitize(raw: unknown): Settings {
   if (typeof r.autoHideBars === 'boolean') s.autoHideBars = r.autoHideBars;
   if (typeof r.prefetch === 'boolean') s.prefetch = r.prefetch;
   if (typeof r.keepScreenAwake === 'boolean') s.keepScreenAwake = r.keepScreenAwake;
+  if (typeof r.immersiveReading === 'boolean') s.immersiveReading = r.immersiveReading;
   return s;
 }
 
@@ -118,6 +122,7 @@ export function applySettings(s: Settings): void {
   }
   const scheme = s.theme === 'dark' || s.theme === 'black' ? 'dark' : 'light';
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', scheme);
+  syncNativeTheme(s.theme, THEME_COLORS[s.theme]);
 }
 
 export type SettingsListener = (s: Settings) => void;

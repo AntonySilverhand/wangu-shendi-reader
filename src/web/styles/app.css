@@ -33,6 +33,12 @@
   /* 动效（电子墨水主题会关闭） */
   --motion-fast: 140ms ease;
   --motion: 220ms cubic-bezier(0.32, 0.72, 0.24, 1);
+
+  /* 安全区域变量：Android 端由原生注入精确像素，Web 端回退到 env() */
+  --safe-top: var(--native-safe-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--native-safe-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--native-safe-left, env(safe-area-inset-left, 0px));
+  --safe-right: var(--native-safe-right, env(safe-area-inset-right, 0px));
 }
 
 :root {
@@ -302,12 +308,12 @@ button {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 40;
-  height: calc(var(--topbar-h) + env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
+  height: calc(var(--topbar-h) + var(--safe-top));
+  padding-top: var(--safe-top);
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-inline: max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-right));
+  padding-inline: max(6px, var(--safe-left)) max(6px, var(--safe-right));
   background: color-mix(in srgb, var(--bg) 96%, transparent);
   border-bottom: 1px solid var(--border);
   transform: translateY(0);
@@ -372,8 +378,8 @@ button {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 2px;
-  padding: 4px max(6px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
-    max(6px, env(safe-area-inset-left));
+  padding: 4px max(6px, var(--safe-right)) calc(4px + var(--safe-bottom))
+    max(6px, var(--safe-left));
   background: color-mix(in srgb, var(--bg) 97%, transparent);
   border-top: 1px solid var(--border);
   transition: transform var(--motion);
@@ -409,8 +415,8 @@ button {
 /* 正文区域 */
 .reader-root {
   display: block;
-  padding-top: calc(var(--topbar-h) + env(safe-area-inset-top));
-  padding-bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom) + 12px);
+  padding-top: calc(var(--topbar-h) + var(--safe-top));
+  padding-bottom: calc(var(--bottombar-h) + var(--safe-bottom) + 12px);
 }
 @media (hover: hover) and (pointer: fine) {
   .reader-root {
@@ -424,7 +430,7 @@ button {
   /* 行宽设置以“字符数”为语义，随字号缩放 */
   max-width: calc(var(--reader-max-width) + var(--reader-margin) * 2);
   margin: 0 auto;
-  padding: 18px var(--reader-margin) 40px;
+  padding: 18px max(var(--reader-margin), var(--safe-right)) 40px max(var(--reader-margin), var(--safe-left));
 }
 .chapter-title {
   font-family: var(--font-body);
@@ -600,7 +606,7 @@ button {
 .home-root {
   max-width: 720px;
   margin: 0 auto;
-  padding: calc(28px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom));
+  padding: calc(28px + var(--safe-top)) max(20px, var(--safe-right)) calc(32px + var(--safe-bottom)) max(20px, var(--safe-left));
   display: grid;
   gap: 22px;
 }
@@ -723,8 +729,8 @@ button {
   transition: transform var(--motion);
   display: flex;
   flex-direction: column;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
   box-shadow: var(--shadow);
 }
 .toc-panel.open {
@@ -735,7 +741,7 @@ html[data-layout='wide'] .toc-panel {
   width: min(340px, 26vw);
   transform: none;
   position: fixed;
-  top: calc(var(--topbar-h) + env(safe-area-inset-top));
+  top: calc(var(--topbar-h) + var(--safe-top));
   bottom: 0;
   padding-top: 0;
   border-top: 0;
@@ -898,7 +904,9 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
   transition: transform var(--motion);
   display: flex;
   flex-direction: column;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-bottom);
+  padding-left: max(0px, var(--safe-left));
+  padding-right: max(0px, var(--safe-right));
   box-shadow: var(--shadow);
 }
 .sheet.show {
@@ -1166,7 +1174,7 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
 .search-bar {
   position: fixed;
   z-index: 62;
-  top: calc(var(--topbar-h) + env(safe-area-inset-top) + 6px);
+  top: calc(var(--topbar-h) + var(--safe-top) + 6px);
   left: 50%;
   transform: translateX(-50%);
   width: min(560px, calc(100vw - 20px));
@@ -1208,7 +1216,7 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
   position: fixed;
   z-index: 90;
   left: 50%;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  bottom: calc(76px + var(--safe-bottom));
   transform: translateX(-50%);
   display: grid;
   gap: 8px;
@@ -1235,7 +1243,7 @@ html[data-layout='wide'] .app[data-toc='open'] .topbar {
 .net-status {
   position: fixed;
   z-index: 55;
-  top: calc(var(--topbar-h) + env(safe-area-inset-top) + 6px);
+  top: calc(var(--topbar-h) + var(--safe-top) + 6px);
   left: 50%;
   transform: translateX(-50%);
   background: var(--bg-elevated);
@@ -1423,3 +1431,33 @@ html[data-layout='wide'] .quick-grid {
 }
 html[data-layout='wide'] .home-recent { grid-column: 1; grid-row: 3; }
 html[data-layout='wide'] .home-local { grid-column: 2 / -1; grid-row: 3; }
+
+/* ------------------------------------------------------------------ */
+/* 系统状态栏与导航手势条衬底：阅读中工具栏隐藏时保证系统图标对比度     */
+/* ------------------------------------------------------------------ */
+.system-bar-scrim {
+  position: fixed;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+  z-index: 19;
+}
+.system-bar-scrim.top {
+  top: 0;
+  height: var(--safe-top);
+  background: var(--bg);
+}
+.system-bar-scrim.bottom {
+  bottom: 0;
+  height: var(--safe-bottom);
+  background: var(--bg);
+}
+.app[data-view="reader"][data-bars="hidden"] ~ .system-bar-scrim {
+  opacity: 1;
+}
+html[data-native-immersive="true"] .system-bar-scrim {
+  display: none !important;
+}
+

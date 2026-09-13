@@ -1,7 +1,9 @@
 import { App } from './app.ts';
 import { installDebugHooks } from './instrument.ts';
+import { initNativeDisplay } from './native-display.ts';
 
 installDebugHooks();
+initNativeDisplay();
 
 // Android APK：在 WebView 内用同构 API 处理 /api/*，书源由原生代理获取
 if (import.meta.env.VITE_TARGET === 'android') {

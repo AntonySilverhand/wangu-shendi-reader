@@ -58,6 +58,23 @@
           /* 忽略：使用默认值 */
         }
       })();
+      // Android: 在首屏绘制前同步原生安全区尺寸，避免工具栏与正文跳动
+      (function () {
+        try {
+          if (window._nativeDisplayBridge && window._nativeDisplayBridge.getDisplaySnapshot) {
+            var raw = window._nativeDisplayBridge.getDisplaySnapshot();
+            if (raw) {
+              var snap = JSON.parse(raw);
+              var root = document.documentElement;
+              if (snap.top != null) root.style.setProperty('--native-safe-top', snap.top + 'px');
+              if (snap.bottom != null) root.style.setProperty('--native-safe-bottom', snap.bottom + 'px');
+              if (snap.left != null) root.style.setProperty('--native-safe-left', snap.left + 'px');
+              if (snap.right != null) root.style.setProperty('--native-safe-right', snap.right + 'px');
+              if (snap.ime != null) root.style.setProperty('--native-ime', snap.ime + 'px');
+            }
+          }
+        } catch (e) {}
+      })();
     </script>
     <link rel="stylesheet" href="/styles/app.css" />
   </head>
@@ -68,6 +85,8 @@
         <p class="boot-text">正在准备阅读器…</p>
       </div>
     </div>
+    <div class="system-bar-scrim top" aria-hidden="true"></div>
+    <div class="system-bar-scrim bottom" aria-hidden="true"></div>
     <div id="overlay-root"></div>
     <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
     <noscript>

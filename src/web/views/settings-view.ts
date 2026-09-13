@@ -17,6 +17,7 @@ import type { TocStore } from '../store/toc.ts';
 import { formatBytes, storageStats, clearBookContent, type StorageStats } from '../store/db.ts';
 import type { DownloadManager, DownloadState } from '../store/download.ts';
 import { formatDate } from '../format.ts';
+import { isNativeDisplayAvailable } from '../native-display.ts';
 
 export interface SettingsDeps {
   settings: SettingsStore;
@@ -205,6 +206,13 @@ export function openSettingsSheet(deps: SettingsDeps): SheetHandle {
       apply({ keepScreenAwake: v }),
     ),
   );
+  if (isNativeDisplayAvailable()) {
+    body.appendChild(
+      toggle('沉浸式阅读', '阅读时隐藏系统状态栏与导航栏，边缘轻扫呼出', s.immersiveReading, (v) =>
+        apply({ immersiveReading: v }),
+      ),
+    );
+  }
 
   const resetBtn = el('button', { class: 'btn ghost small', type: 'button' }, '恢复默认排版');
   resetBtn.addEventListener('click', async () => {
@@ -222,6 +230,7 @@ export function openSettingsSheet(deps: SettingsDeps): SheetHandle {
       autoHideBars: true,
       prefetch: true,
       keepScreenAwake: false,
+      immersiveReading: false,
     });
     deps.onLayoutChanged();
     showToast('已恢复默认设置');
