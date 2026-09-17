@@ -1,0 +1,62 @@
+{
+  "intraPageLegitimateDuplicate": {
+    "description": "页内重复合法句：同页内相邻相同段落属于原文，不应被错误删除",
+    "page0Paragraphs": [
+      "第一段：两军对垒，气氛凝重。",
+      "“杀！”",
+      "“杀！”",
+      "“杀！”",
+      "后退者死，唯有向前。"
+    ],
+    "page1Paragraphs": [
+      "后退者死，唯有向前。",
+      "战鼓轰鸣，天地变色。"
+    ],
+    "legacyTsOutput": [
+      "第一段：两军对垒，气氛凝重。",
+      "“杀！”",
+      "后退者死，唯有向前。",
+      "战鼓轰鸣，天地变色。"
+    ],
+    "nativeExpectedOutput": [
+      "第一段：两军对垒，气氛凝重。",
+      "“杀！”",
+      "“杀！”",
+      "“杀！”",
+      "后退者死，唯有向前。",
+      "战鼓轰鸣，天地变色。"
+    ],
+    "rationale": "sourceSemanticsVersion 5 仅在跨页边界消除上页末段与下页首段的重复，页内连续相同段落完整保留。"
+  },
+  "nonAdjacentMissingPageRepetition": {
+    "description": "非相邻缺页重复：中间有缺失页时，不得将非相邻页误作相邻页进行跨页去重",
+    "page0Paragraphs": [
+      "天地玄黄，宇宙洪荒。",
+      "日月盈昃，辰宿列张。"
+    ],
+    "missingPageIndex": 1,
+    "page2Paragraphs": [
+      "日月盈昃，辰宿列张。",
+      "寒来暑往，秋收冬藏。"
+    ],
+    "nativeExpectedOutput": [
+      "天地玄黄，宇宙洪荒。",
+      "日月盈昃，辰宿列张。",
+      "日月盈昃，辰宿列张。",
+      "寒来暑往，秋收冬藏。"
+    ],
+    "missingPages": [
+      1
+    ],
+    "complete": false,
+    "rationale": "由于第 1 页缺失，第 0 页与第 2 页并非连续物理页，不能确定重复是否为跨页重叠，必须完整保留以待补全。"
+  },
+  "longParagraphAndEmoji": {
+    "description": "超长段落与 Emoji/代理对边界：验证 UTF-16 code units 偏移与显示块切分",
+    "longParagraphPrefix": "万古神帝正文长段开始：",
+    "repeatUnit": "天地初开，大道争锋。⚡",
+    "repeatCount": 600,
+    "emojiSequence": "🐉📖⚡𠮷",
+    "rationale": "测试段落字符数超过 8000 UTF-16 code units 时的大段拆分与代理对完整性。"
+  }
+}

@@ -1,0 +1,121 @@
+[
+  {
+    "file": "chapter-13375259-p1.html",
+    "relPath": "test/fixtures/chapter-13375259-p1.html",
+    "purpose": "老版本模板降级：#content 回退、无 base64 编码",
+    "sha256": "f2e29cf290fddfbc1a4a0f241f4a33fc5fcc916d48da143b0953059c94d39a76",
+    "bytes": 24239
+  },
+  {
+    "file": "chapter-38621328-p1.html",
+    "relPath": "test/fixtures/chapter-38621328-p1.html",
+    "purpose": "多物理页章节第 1 页（共 3 页）",
+    "sha256": "ad9414f2a5df2e1f3880efc2b7123c5bd9a368df3bacee9dbe53eddb69570be9",
+    "bytes": 24789
+  },
+  {
+    "file": "chapter-38621328-p2.html",
+    "relPath": "test/fixtures/chapter-38621328-p2.html",
+    "purpose": "多物理页章节第 2 页（共 3 页）",
+    "sha256": "5ace3b2638bbe882ab706b72bbfaa5ab7aed711253444d944bb85f4721ff2b8a",
+    "bytes": 25367
+  },
+  {
+    "file": "chapter-38621328-p3.html",
+    "relPath": "test/fixtures/chapter-38621328-p3.html",
+    "purpose": "多物理页章节第 3 页（末页终章证据）",
+    "sha256": "eee9c6eb0396e90d01700791ef82bc79d732201dff3d3681327b81809c397b3d",
+    "bytes": 24959
+  },
+  {
+    "file": "chapter-38621330-p2.html",
+    "relPath": "test/fixtures/chapter-38621330-p2.html",
+    "purpose": "独立分页：含跨章邻接链接",
+    "sha256": "51203d1b137031c48c987d4c5df75998749d082c1fbe2cb448b7c7dca4d62c3d",
+    "bytes": 24172
+  },
+  {
+    "file": "chapter-38621571-loopback.html",
+    "relPath": "test/fixtures/chapter-38621571-loopback.html",
+    "purpose": "回环探针章节探针页：重复第一页正文，自报 index 偏小",
+    "sha256": "1fa37f67843229609da716eb287ec778d56380df0ff01cabc8a3d55b31467484",
+    "bytes": 24584
+  },
+  {
+    "file": "chapter-38621571-p1.html",
+    "relPath": "test/fixtures/chapter-38621571-p1.html",
+    "purpose": "回环探针章节第 1 页",
+    "sha256": "b6ea521c8070d2ada08838a5bc0f1b2a16744c2e0144082ac14f159925508823",
+    "bytes": 24584
+  },
+  {
+    "file": "chapter-38621571-p2.html",
+    "relPath": "test/fixtures/chapter-38621571-p2.html",
+    "purpose": "回环探针章节第 2 页",
+    "sha256": "89439242b8c1698f954aac754c4eb6f2b21181d1940c11e30314a3703d8fe01a",
+    "bytes": 24998
+  },
+  {
+    "file": "chapter-38621571-p3.html",
+    "relPath": "test/fixtures/chapter-38621571-p3.html",
+    "purpose": "回环探针章节第 3 页",
+    "sha256": "cad89464f26a58ea102a0b060a9ea50b572ef34cc9d4e7953a44cc5564234fdd",
+    "bytes": 25534
+  },
+  {
+    "file": "chapter-38626103-p1.html",
+    "relPath": "test/fixtures/chapter-38626103-p1.html",
+    "purpose": "5 物理页长章第 1 页",
+    "sha256": "8b0f132cd6a55c910c3e9fd093d5d3a53557e57a454153844d1f1f1471f0d958",
+    "bytes": 26685
+  },
+  {
+    "file": "chapter-38626103-p2.html",
+    "relPath": "test/fixtures/chapter-38626103-p2.html",
+    "purpose": "5 物理页长章第 2 页",
+    "sha256": "6c6c4285d2206949bf46fdf172b24719ece2a956096b72d57432a9196eb2a14a",
+    "bytes": 27787
+  },
+  {
+    "file": "chapter-38626103-p3.html",
+    "relPath": "test/fixtures/chapter-38626103-p3.html",
+    "purpose": "5 物理页长章第 3 页",
+    "sha256": "43e0c3af41fe0dbfcae74297c3601471e88f1f012f2fde91edf4364b0458b268",
+    "bytes": 27845
+  },
+  {
+    "file": "chapter-38626103-p4.html",
+    "relPath": "test/fixtures/chapter-38626103-p4.html",
+    "purpose": "5 物理页长章第 4 页",
+    "sha256": "e8f85552bd9743ce34d6218ce4c23a50a82993732e39a71b63d5e952f5e16af2",
+    "bytes": 30261
+  },
+  {
+    "file": "chapter-38626103-p5.html",
+    "relPath": "test/fixtures/chapter-38626103-p5.html",
+    "purpose": "5 物理页长章第 5 页（末页）",
+    "sha256": "382db5a393671eb4575f933dc9906970ed14b1609a2ddc12629cb126c59108c2",
+    "bytes": 28971
+  },
+  {
+    "file": "chapter-8924760-p1.html",
+    "relPath": "test/fixtures/chapter-8924760-p1.html",
+    "purpose": "早期单页章节：常规单页 base64 解析",
+    "sha256": "2e49f2df54b46bc90b11596ef6fdc5751e652f7a9feb453a07d76b5541a2e442",
+    "bytes": 24057
+  },
+  {
+    "file": "toc-page1.html",
+    "relPath": "test/fixtures/toc-page1.html",
+    "purpose": "目录第 1 页：包含置顶新书番外块与尾部快捷链接",
+    "sha256": "9037e20268ce2d5ad8b3cee1145373a97f91ab1c8739bf6c6dc1b8cf2e5fa856",
+    "bytes": 30153
+  },
+  {
+    "file": "toc-page2.html",
+    "relPath": "test/fixtures/toc-page2.html",
+    "purpose": "目录第 2 页：分页目录与翻页导航",
+    "sha256": "080912802a3fd9a58147dc42db2917ad1360067596de926580dd121706d89b59",
+    "bytes": 36070
+  }
+]

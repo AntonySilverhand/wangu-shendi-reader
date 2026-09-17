@@ -1,0 +1,5 @@
+# 签名配置示例（仅作字段格式参考，请勿提交真实密钥与密码到版本库）
+storeFile=/path/to/your/release.keystore
+storePassword=your_store_password
+keyAlias=your_key_alias
+keyPassword=your_key_password
