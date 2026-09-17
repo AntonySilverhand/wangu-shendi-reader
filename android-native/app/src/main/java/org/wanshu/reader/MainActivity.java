@@ -57,7 +57,8 @@ public class MainActivity extends Activity {
                 container.getPersonalRepository(),
                 container.getNavigator(),
                 container.getExecutors(),
-                container.getTextBlockBuilder()
+                container.getTextBlockBuilder(),
+                container.getDownloadCoordinator()
         );
 
         container.getBackController().setDialogDismissHandler(shelfController);
@@ -67,6 +68,22 @@ public class MainActivity extends Activity {
         container.getNavigator().addListener(navigationListener);
 
         container.getPersonalRepository().getLastRoute(new MainLastRouteCallback(this));
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (container != null && container.getDownloadCoordinator() != null) {
+            container.getDownloadCoordinator().setAppForeground(true);
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        if (container != null && container.getDownloadCoordinator() != null) {
+            container.getDownloadCoordinator().setAppForeground(false);
+        }
+        super.onStop();
     }
 
     @Override

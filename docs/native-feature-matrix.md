@@ -5,25 +5,25 @@
 
 | ID | 功能描述 | 基线文件 | 原生目标/验收标准 | 实现文件 | 自动测试 | 手工验证步骤 | 状态 |
 |---|---|---|---|---|---|---|---|
-| F01 | 书架、书名/作者、继续阅读、从头读、每书进度、最近阅读 | `home-view.ts`, `personal.ts` | 在线书 + 多 TXT 同列；历史每书去重保留30条，首页至少展示最近5条 | 待实现 | 待编写 | 待验证 | pending |
-| F02 | **阅读返回书架与换书** | `app.ts`, `MainActivity.java` | 可见“书架”入口 + 系统返回；A→B→A 各自恢复；同 chapterId 不串书 | 待实现 | 待编写 | 待验证 | pending |
-| F03 | 章节标题、正文、字数/段数、本地/离线/缺页状态 | `reader.ts` | 缓存优先；缺页不能显示成完整；错误页仍能回书架 | 待实现 | 待编写 | 待验证 | pending |
-| F04 | 上下章、章首章尾、目录跳转、重取本章/继续补全 | `reader.ts`, `app.ts` | 首尾禁用正确；目录缺失时可用可靠 prev/next 兜底；旧内容不被较短结果覆盖 | 待实现 | 待编写 | 待验证 | pending |
-| F05 | 目录主线/番外、当前项、已缓存标记、分页懒加载、加载完整目录、失败重试 | `toc.ts`, `toc-view.ts` | RecyclerView 虚拟化；完整/部分/旧缓存标记区分；4300+项不卡 | 待实现 | 待编写 | 待验证 | pending |
-| F06 | 目录搜标题、章号、ID；数字定位；渐进搜索与取消 | `toc-search.ts` | 已缓存命中零请求；失败穷尽后停止；无 render→fetch 闭环 | 待实现 | 待编写 | 待验证 | pending |
-| F07 | 五主题：light/dark/black/eink/paper；静态纹理可关 | `settings.ts`, CSS | 系统栏、弹窗、键盘周边、启动面全覆盖；eink 无装饰动画 | 待实现 | 待编写 | 待验证 | pending |
-| F08 | system/hei/serif/kai；字号14–28、行距1.3–2.4、段距0–1.6、边距8–64、行宽24–60 | `settings.ts` | 即时预览、持久化、恢复默认；缺系统字体明确回退，不下载大字体 | 待实现 | 待编写 | 待验证 | pending |
-| F09 | 段落+字符精确位置；旋转、分屏、改排版后恢复 | `reader.ts` | 同一文本锚点；不能只用 RecyclerView 行号/像素 | 待实现 | 待编写 | 待验证 | pending |
-| F10 | 添加/取消、列表、摘要、时间、跳转、单删/清空书签 | `bookmarks-view.ts` | 同章不同位置可跳转；成功提示必须在事务提交后 | 待实现 | 待编写 | 待验证 | pending |
-| F11 | 本章搜索、总命中数、上/下一个、高亮、关闭恢复 | `search-view.ts` | 搜索不会改变正文/偏移；大量命中仍可遍历；输入法不遮挡 | 待实现 | 待编写 | 待验证 | pending |
-| F12 | 触摸滚动/正文点击唤栏、滚动自动收栏、鼠标、键盘快捷键 | `reader.ts`, `app.ts` | 保留 ←/→、T/F/B/S/逗号、Esc、Home/End；编辑时不抢键；文字可选择复制 | 待实现 | 待编写 | 待验证 | pending |
-| F13 | 手机/横屏/平板/折叠/大窗口布局，目录栏与进度栏 | `layout.ts`, CSS | 按窗口 dp 宽度响应，不按设备型号；内容限制行宽；点击目标≥48dp | 待实现 | 待编写 | 待验证 | pending |
-| F14 | edge-to-edge、四边 cutout、IME、可选沉浸、可选阅读常亮 | `native-display.ts`, Java display 类 | 沉浸默认关，编辑/弹层暂退出；常亮只在前台阅读生效 | 待实现 | 待编写 | 待验证 | pending |
-| F15 | 手动范围下载、当前起50/100/300章、全部、进度、失败列表、取消/重试 | `download.ts`, `settings-view.ts` | 持久化、可暂停恢复；“全部”包含主线与番外，不只当前已载目录 | 待实现 | 待编写 | 待验证 | pending |
-| F16 | **可开关的阅读时自动缓存** | 新增 | 后续优先→前文补齐；前台才运行；用户操作优先；退避可恢复 | 待实现 | 待编写 | 待验证 | pending |
-| F17 | 缓存章数/字节/空间、清理正文、离线阅读与未缓存提示 | `db.ts`, `settings-view.ts` | 统计不读正文全集；清缓存不动个人数据/本地书；可知道连续离线余量 | 待实现 | 待编写 | 待验证 | pending |
-| F18 | 多 TXT 导入、标题识别、自动进入/继续、本地删除、导出缓存 TXT | `txt.ts`, `app.ts` | SAF 文件读写；流式导入导出；导出按目录顺序含番外，缺章/部分章提示 | 待实现 | 待编写 | 待验证 | pending |
-| F19 | 个人 JSON 导入导出、merge/replace、设置/书签/进度/历史 | `personal.ts` | 兼容 version1 格式；明确不包含正文；取消不做替换 | 待实现 | 待编写 | 待验证 | pending |
-| F20 | 帮助、快捷键、版本、数据/保存失败诊断 | `settings-view.ts` | 本地保存说明，无云同步；源站不可用不阻止本地阅读 | 待实现 | 待编写 | 待验证 | pending |
-| F21 | 安装到主屏幕、Service Worker 离线壳、网页键鼠/宽屏 | `public/`, `src/web/` | 网页维持可用；原生 APK 自带壳，不显示 PWA 安装按钮 | 待实现 | 待编写 | 待验证 | pending |
-| F22 | 老 APK 原地升级数据迁移 | 新增兼容工作 | 书签/进度/设置/目录/TXT/缓存不因重写丢失，见第8节 | 待实现 | 待编写 | 待验证 | pending |
+| F01 | 书架、书名/作者、继续阅读、从头读、每书进度、最近阅读 | `home-view.ts`, `personal.ts` | 在线书 + 多 TXT 同列；历史每书去重保留30条，首页至少展示最近5条 | `ShelfView.java`, `ShelfController.java`, `PersonalRepository.java` | `BookSwitchingTest.java`, `PersonalDurabilityTest.java` | 启动进入书架，在线与导入书并列，进度正确恢复 | verified |
+| F02 | **阅读返回书架与换书** | `app.ts`, `MainActivity.java` | 可见“书架”入口 + 系统返回；A→B→A 各自恢复；同 chapterId 不串书 | `MainActivity.java`, `AppNavigator.java`, `BackController.java`, `ReaderController.java` | `BookSwitchingTest.java`, `AppNavigatorTest.java` | 顶栏书架按钮与系统返回键，A→书架→B→书架→A进度隔离 | verified |
+| F03 | 章节标题、正文、字数/段数、本地/离线/缺页状态 | `reader.ts` | 缓存优先；缺页不能显示成完整；错误页仍能回书架 | `ReaderView.java`, `ReaderController.java`, `ContentRepository.java` | `ReaderRepositoryTest.java`, `ContentDurabilityTest.java` | 断网打开已缓存章显示完整，未缓存章显示重试且可回书架 | verified |
+| F04 | 上下章、章首章尾、目录跳转、重取本章/继续补全 | `reader.ts`, `app.ts` | 首尾禁用正确；目录缺失时可用可靠 prev/next 兜底；旧内容不被较短结果覆盖 | `ReaderController.java`, `ReaderPrevClickListener.java`, `ReaderNextClickListener.java`, `TocDialog.java` | `ChapterAssemblerTest.java`, `ContentDurabilityTest.java` | 翻章首尾按钮禁用正常，从目录跳转指定章节 | verified |
+| F05 | 目录主线/番外、当前项、已缓存标记、分页懒加载、加载完整目录、失败重试 | `toc.ts`, `toc-view.ts` | RecyclerView 虚拟化；完整/部分/旧缓存标记区分；4300+项不卡 | `TocDialog.java`, `TocAdapter.java`, `TocMerger.java`, `ContentTocSearchDeps.java` | `TocMergerTest.java`, `verify-source-contracts.mjs` | 打开目录面板，主线与番外切换，缓存徽标正确显示 | verified |
+| F06 | 目录搜标题、章号、ID；数字定位；渐进搜索与取消 | `toc-search.ts` | 已缓存命中零请求；失败穷尽后停止；无 render→fetch 闭环 | `TocSearchController.java`, `ContentTocSearchDeps.java`, `TocDialog.java` | `TocSearchControllerTest.java` | 目录搜索框输入数字或字符，260ms防抖出结果，取消即刻停止 | verified |
+| F07 | 五主题：light/dark/black/eink/paper；静态纹理可关 | `settings.ts`, CSS | 系统栏、弹窗、键盘周边、启动面全覆盖；eink 无装饰动画 | `ReaderThemeConfig.java`, `ThemeColors.java`, `SettingsDialog.java` | `ReaderTypographyAndAnchorTest.java` | 设置面板切换5种主题，阅读器正文、操作栏、弹窗同步变色 | verified |
+| F08 | system/hei/serif/kai；字号14–28、行距1.3–2.4、段距0–1.6、边距8–64、行宽24–60 | `settings.ts` | 即时预览、持久化、恢复默认；缺系统字体明确回退，不下载大字体 | `SettingsDialog.java`, `ReaderApplyTypographyRunnable.java` | `ReaderTypographyAndAnchorTest.java` | 设置面板调节字号/行距/边距，实时应用并持久化，重置恢复默认 | verified |
+| F09 | 段落+字符精确位置；旋转、分屏、改排版后恢复 | `reader.ts` | 同一文本锚点；不能只用 RecyclerView 行号/像素 | `ReaderAnchorSampler.java`, `ReaderScrollListener.java`, `AnchorMapper.java` | `ReaderTypographyAndAnchorTest.java` | 阅读中滚动停止精确采样，改变排版或换章后位置行内恢复 | verified |
+| F10 | 添加/取消、列表、摘要、时间、跳转、单删/清空书签 | `bookmarks-view.ts` | 同章不同位置可跳转；成功提示必须在事务提交后 | `BookmarksDialog.java`, `BookmarksAdapter.java`, `PersonalRepository.java` | `PersonalDurabilityTest.java` | 阅读点击书签，添加当前位置，列表点击跳转，单删与清空 | verified |
+| F11 | 本章搜索、总命中数、上/下一个、高亮、关闭恢复 | `search-view.ts` | 搜索不会改变正文/偏移；大量命中仍可遍历；输入法不遮挡 | `ChapterSearchEngine.java`, `ReaderController.java`, `ReaderBlockAdapter.java`, `BlockViewHolder.java` | `ChapterSearchEngineTest.java` | 点击搜索输入关键词，正文黄色高亮，▲▼循环跳转并橙色标明 | verified |
+| F12 | 触摸滚动/正文点击唤栏、滚动自动收栏、鼠标、键盘快捷键 | `reader.ts`, `app.ts` | 保留 ←/→、T/F/B/S/逗号、Esc、Home/End；编辑时不抢键；文字可选择复制 | `ReaderView.java`, `ReaderController.java`, `BlockViewHolder.java` | `check-no-lambdas.sh`, `build.sh test` | 点击正文唤出顶部栏，长按文字原生选择复制，键盘方向键/S/B/T响应 | verified |
+| F13 | 手机/横屏/平板/折叠/大窗口布局，目录栏与进度栏 | `layout.ts`, CSS | 按窗口 dp 宽度响应，不按设备型号；内容限制行宽；点击目标≥48dp | `ReaderView.java`, `ShelfView.java`, `ReaderWindowInsetsListener.java` | `ReaderWindowInsetsListener.java` | 旋转屏幕与多窗口下自适应边距与沉浸，按钮保持≥48dp | verified |
+| F14 | edge-to-edge、四边 cutout、IME、可选沉浸、可选阅读常亮 | `native-display.ts`, Java display 类 | 沉浸默认关，编辑/弹层暂退出；常亮只在前台阅读生效 | `ReaderWindowInsetsListener.java`, `SettingsDialog.java`, `ReaderController.java` | `ReaderTypographyAndAnchorTest.java` | 勾选常亮屏幕不灭，勾选沉浸全屏隐藏系统栏 | verified |
+| F15 | 手动范围下载、当前起50/100/300章、全部、进度、失败列表、取消/重试 | `download.ts`, `settings-view.ts` | 持久化、可暂停恢复；“全部”包含主线与番外，不只当前已载目录 | `DownloadCoordinator.java`, `DownloadsDialog.java`, `DownloadPumpRunnable.java`, `RetryPolicy.java` | `DownloadCoordinatorTest.java`, `RetryPolicyTest.java` | 设置打开下载管理，选择50/100/300/全书，下载/暂停/继续/取消/重试 | verified |
+| F16 | **可开关的阅读时自动缓存** | 新增 | 后续优先→前文补齐；前台才运行；用户操作优先；退避可恢复 | `DownloadPlanner.java`, `ReadingSessionGate.java`, `DownloadCoordinator.java`, `DownloadAutoPlanRunnable.java`, `SettingsDialog.java`, `ReaderView.java` | `DownloadPlannerTest.java`, `DownloadCoordinatorTest.java` | 设置开启自动缓存，按后50/全书顺序规划下载并提示连续离线章节数，离开暂停，跳章优先提升附近缺失 | verified |
+| F17 | 缓存章数/字节/空间、清理正文、离线阅读与未缓存提示 | `db.ts`, `settings-view.ts` | 统计不读正文全集；清缓存不动个人数据/本地书；可知道连续离线余量 | `ContentRepository.java`, `StorageStats.java`, `SettingsDialog.java` | `ContentDurabilityTest.java` | 设置面板查看缓存章数与字节，清理缓存仅清网络正文保留书签 | verified |
+| F18 | 多 TXT 导入、标题识别、自动进入/继续、本地删除、导出缓存 TXT | `txt.ts`, `app.ts` | SAF 文件读写；流式导入导出；导出按目录顺序含番外，缺章/部分章提示 | `TxtImporter.java`, `TxtExporter.java`, `TxtSplitter.java` | `TxtImportExportTest.java`, `TxtSplitterTest.java` | 书架导入 TXT，多章节识别入库，删除本地书内容完全清除 | verified |
+| F19 | 个人 JSON 导入导出、merge/replace、设置/书签/进度/历史 | `personal.ts` | 兼容 version1 格式；明确不包含正文；取消不做替换 | `PersonalBackupHelper.java`, `SettingsDialog.java`, `SettingsImportDialog.java` | `PersonalBackupTest.java` | 导出个人数据复制到剪贴板，导入支持合并与覆盖并刷新设置 | verified |
+| F20 | 帮助、快捷键、版本、数据/保存失败诊断 | `settings-view.ts` | 本地保存说明，无云同步；源站不可用不阻止本地阅读 | `SettingsHelpDialog.java`, `SettingsDialog.java` | `check-no-lambdas.sh` | 设置面板打开快捷键与说明，查看按键列表与零后台说明 | verified |
+| F21 | 安装到主屏幕、Service Worker 离线壳、网页键鼠/宽屏 | `public/`, `src/web/` | 网页维持可用；原生 APK 自带壳，不显示 PWA 安装按钮 | Web 端既有实现 | `npm test` (66 tests), `typecheck` | 网页端测试 100% 保持通过 | verified |
+| F22 | 老 APK 原地升级数据迁移 | 新增兼容工作 | 书签/进度/设置/目录/TXT/缓存不因重写丢失，见第8节 | 待实现（P9） | 待编写 | 待验证 | pending |

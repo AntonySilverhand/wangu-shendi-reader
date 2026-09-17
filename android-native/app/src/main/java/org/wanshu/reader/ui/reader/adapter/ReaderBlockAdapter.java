@@ -23,6 +23,27 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
     private View.OnClickListener shelfListener;
     private View.OnClickListener nextListener;
 
+    private String highlightQuery = null;
+    private int activeMatchParagraph = -1;
+    private int activeMatchStartOffset = -1;
+    private int activeMatchEndOffset = -1;
+
+    public void setSearchHighlights(String query, int activeParagraph, int activeStart, int activeEnd) {
+        this.highlightQuery = query;
+        this.activeMatchParagraph = activeParagraph;
+        this.activeMatchStartOffset = activeStart;
+        this.activeMatchEndOffset = activeEnd;
+        notifyDataSetChanged();
+    }
+
+    public void clearHighlights() {
+        this.highlightQuery = null;
+        this.activeMatchParagraph = -1;
+        this.activeMatchStartOffset = -1;
+        this.activeMatchEndOffset = -1;
+        notifyDataSetChanged();
+    }
+
     public void setData(
             String title,
             List<TextBlock> blocks,
@@ -92,12 +113,24 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         } else if (holder instanceof BlockViewHolder) {
             int blockIndex = position - 1;
             if (blockIndex >= 0 && blockIndex < blocks.size()) {
-                ((BlockViewHolder) holder).bind(
-                        blocks.get(blockIndex),
+                TextBlock blk = blocks.get(blockIndex);
+                int activeStart = -1;
+                int activeEnd = -1;
+                if (activeMatchParagraph >= blk.getStartParagraphIndex() && activeMatchParagraph <= blk.getEndParagraphIndex()) {
+                    int relP = activeMatchParagraph - blk.getStartParagraphIndex();
+                    int pStart = blk.getParagraphStartOffset(relP);
+                    activeStart = pStart + activeMatchStartOffset;
+                    activeEnd = pStart + activeMatchEndOffset;
+                }
+                ((BlockViewHolder) holder).bindWithHighlight(
+                        blk,
                         colors,
                         fontSizeSp,
                         lineSpacingMultiplier,
-                        marginDp
+                        marginDp,
+                        highlightQuery,
+                        activeStart,
+                        activeEnd
                 );
             }
         } else if (holder instanceof FooterViewHolder) {

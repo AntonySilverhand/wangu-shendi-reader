@@ -34,6 +34,25 @@ public interface DownloadTaskDao {
     @Query("UPDATE download_tasks SET state = 'PENDING', run_token = 0 WHERE state = 'RUNNING'")
     int resetOrphanedRunningTasks();
 
+    @Query("UPDATE download_tasks SET state = 'PENDING', attempts = 0, next_attempt_at = 0, error_type = '', run_token = 0 WHERE book_id = :bookId AND (state = 'NEEDS_ACTION' OR state = 'RETRY_AT')")
+    int resetFailedTasks(String bookId);
+
+    @Query("UPDATE download_tasks SET priority = MAX(priority, :priority), demand_flags = demand_flags | :demandFlag WHERE book_id = :bookId AND chapter_id = :chapterId")
+    void elevatePriority(String bookId, String chapterId, int priority, int demandFlag);
+
+    @Query("UPDATE download_tasks SET demand_flags = demand_flags & ~:demandFlag WHERE book_id = :bookId")
+    void removeDemandFlag(String bookId, int demandFlag);
+
+    @Query("DELETE FROM download_tasks WHERE book_id = :bookId AND demand_flags = 0")
+    void deleteOrphanedTasks(String bookId);
+
+    @Query("SELECT * FROM download_tasks WHERE book_id = :bookId AND (demand_flags & :flag) != 0")
+    List<DownloadTaskEntity> getTasksByDemand(String bookId, int flag);
+
+    @Query("SELECT COUNT(*) FROM download_tasks WHERE book_id = :bookId AND state = 'COMPLETE'")
+    int getCompletedCount(String bookId);
+
     @Query("DELETE FROM download_tasks WHERE book_id = :bookId")
     void clearTasksForBook(String bookId);
 }
+

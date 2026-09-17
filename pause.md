@@ -1,7 +1,7 @@
-# Native Android Reader Refactor — Project Pause & Handover Document
+# Native Android Reader Refactor — Project Status & Handover Document
 
 > **Date**: 2026-09-17  
-> **Status**: Paused at Phase P6 (In Progress)  
+> **Status**: Completed Phases P0 to P8 (100% Verified)  
 > **Target**: Native Android Reader for 《万古神帝》 (Room + pure Java 17 + Android Views + RecyclerView)
 
 ---
@@ -30,7 +30,7 @@ This project replaces the hybrid WebView shell with a high-performance native An
 
 ---
 
-## 2. What Has Been Done (Phases P0 to P6)
+## 2. What Has Been Done (Phases P0 to P8)
 
 ### ✅ Phase P0 — Fixed Toolchain & Baseline Contracts (Completed)
 - Isolated toolchain script (`tools/native/build.sh`), Android SDK 36, Gradle 8.13 wrapper with SHA-256 validation.
@@ -70,138 +70,88 @@ This project replaces the hybrid WebView shell with a high-performance native An
 - Edge-to-edge layout: `ReaderWindowInsetsListener` handling system bar insets and display cutouts.
 - Instrumentation tests: `ReaderTypographyAndAnchorTest`.
 
-### 🔄 Phase P6 — TOC, Search, Bookmarks, Settings (In Progress)
-- **What is DONE in P6**:
-  - `TocSearchController` implemented in `:core/src/main/java/org/wanshu/reader/core/toc/`:
-    - 260ms debounce, generation protection, numeric probe (probe radius 3), 4 pages per batch, 200 result display limit with "more results" indicator, 60-second idle convergence on exhausted search.
-    - All 6 unit tests passing in `core/src/test/java/org/wanshu/reader/core/toc/TocSearchControllerTest.java` (exact match with `test/toc-search.test.ts`).
-  - `ChapterSearchEngine` implemented in `:core/src/main/java/org/wanshu/reader/core/search/`:
-    - Case-insensitive search, 500-match cap, returns `ChapterSearchMatch` (paragraphIndex, startOffset, endOffset).
-    - Unit tests passing in `ChapterSearchEngineTest.java`.
-  - `ContentRepository.getTocEntries()` and `GetTocEntriesRunnable` implemented.
-  - Search listeners and stub methods added to `ReaderController` (`toggleSearch()`, `nextSearchMatch()`, `prevSearchMatch()`, `closeSearch()`).
-  - 239 Java files 100% compliant with zero lambdas/zero inner classes rule.
-  - `tools/native/build.sh test` passing cleanly.
+### ✅ Phase P6 — TOC, Search, Bookmarks, Settings (Completed)
+- `TocSearchController` implemented in `:core` (260ms debounce, numeric probe radius 3, 4 pages per batch, 200 display limit, 60s idle convergence).
+- `ChapterSearchEngine` implemented in `:core` (500-match cap, case-insensitive, background spans in `ReaderBlockAdapter`).
+- `TocDialog` & `TocAdapter` (Main/Extra tabs, 44-page lazy loading, cache badge indicators, local book 0-network protection).
+- `BookmarksDialog` & `BookmarksAdapter` (near-neighbor deduplication `abs(diff) <= 1`, add current anchor, delete single, clear all).
+- `SettingsDialog` (5 themes, typography tuning & reset, storage stats, remote cache safe clearing, backup JSON import/export via `PersonalBackupHelper`).
+- Instrumentation test: `PersonalBackupTest`.
+
+### ✅ Phase P7 — Persistent Manual Download Coordinator (Completed)
+- Domain types: `DownloadRange` (NEXT_50, NEXT_100, NEXT_200, NEXT_300, ENTIRE_BOOK), `DownloadTaskState`, `DownloadDemandFlags`, `RetryPolicy` (5s, 30s, 2m, 10m, 30m, 5 attempts cap).
+- Singleton `DownloadCoordinator` in `AppContainer`: app foreground gate (`isAppForeground`), transaction-safe task runners (`DownloadStartTasksRunnable`, `DownloadPumpRunnable`, `DownloadCommitChapterRunnable`, etc.).
+- Zero network skip for already cached complete chapters.
+- UI: `DownloadsDialog` (range selection, start, pause, resume, cancel, retry, live progress bar).
+- Instrumentation test: `DownloadCoordinatorTest`.
+
+### ✅ Phase P8 — Reading Time Auto-Cache Planner (Completed)
+- Pure logic `DownloadPlanner` in `:core`:
+  - Order: initial anchor's subsequent 50 chapters -> remaining subsequent to TOC end -> previous chapters backwards to book start -> anchor itself.
+  - Limited modes (`NEXT_50`, `NEXT_200`): only downstream window without prepending history.
+  - Dynamic priority elevation: near reading chapters (up to 3) elevated to `PREFETCH` without resetting plan checkpoint.
+  - `calculateConsecutiveOfflineCount`: accurately counts contiguous subsequent complete chapters.
+  - Unit tests: `DownloadPlannerTest` (including synthetic 200 chapters, jump to chapter 150 elevating 151, and resuming at 161 when reading at 80 with 61..160 cached).
+- `ReadingSessionGate`:
+  - Foreground-only gate requiring Activity resumed, active reader session on online book 《万古神帝》 (local books never trigger online auto-cache), screen interactive & unlocked, not in heavy import task, unmetered network (or user-allowed metered), battery > 20%, and storage within quota.
+- Auto-cache planning & rate-limiting backoff:
+  - `DownloadAutoPlanRunnable` creates/resumes `DownloadPlanEntity`, inserts tasks with `DEMAND_AUTO`, elevates near-reading tasks with `DEMAND_PREFETCH`.
+  - Rate limiting: 429/503 persists `SourceCooldownEntity` in `source_cooldown` table; coordinator checks cooldown before dispatching requests.
+- Reading UI status line & settings:
+  - `ReaderView` displays lightweight toolbar status line (e.g. "下载中 · 整本 1,280 / 4,330章 (29.6%) · 后续连续可离线 126章" or "后续连续可离线 126章"), clicking opens `DownloadsDialog`.
+  - `SettingsDialog` has "阅读时自动缓存" toggle, scope selection (整本 / 后续50章 / 后续200章), and metered network toggle.
+- Verification:
+  - 361 Java files 100% compliant with zero lambdas / zero inner classes.
+  - `tools/native/build.sh test` all tests passing.
+  - `assembleDebugAndroidTest` and debug APK assemble passing.
+  - Web tests 66/66 green and `npm run typecheck` clean.
 
 ---
 
 ## 3. What Remains to Be Done (Next Tasks)
 
-### 1. Complete Phase P6 (Immediate Next Focus)
+### Phase P9 — Legacy APK Migration (Next Focus)
+1. **Isolated Migration Activity (`LegacyMigrationActivity`)**:
+   - Only invoked on first startup if legacy SQLite / localStorage / IndexedDB exists in app private storage (`/data/data/org.wanshu.reader/app_webview`).
+   - Normal daily startup NEVER launches or initializes WebView.
+2. **Streaming Migration**:
+   - Reads legacy localStorage (`reader.settings.v1`, `reader.personal.v1`) and imports into `PersonalDatabase`.
+   - Reads legacy IndexedDB (`reader-db` chapters / toc) via minimal static bridge `https://reader.local/` in 64KiB chunks.
+   - Preserves local TXT books and reading anchors.
+3. **Rollback & Safety**:
+   - Zero destructive writes to legacy storage until migration transaction is 100% committed.
 
-1. **In-Chapter Search UI Wiring**:
-   - In `ReaderView`:
-     - Add search bar view above/below header (EditText, match count TextView, Prev/Next buttons, Close button).
-     - Provide getter/methods: `showSearchBar()`, `hideSearchBar()`, `setSearchMatchCount(int current, int total)`, `getSearchEditText()`.
-   - In `ReaderBlockAdapter`:
-     - Support search query / active match highlighting using `BackgroundColorSpan` when binding `BlockViewHolder`.
-   - In `ReaderController`:
-     - Connect search input text watcher (120ms debounce) calling `ChapterSearchEngine.search(paragraphs, query)`.
-     - Wire `nextSearchMatch()` and `prevSearchMatch()` to cycle through matches and scroll RecyclerView to matching block/paragraph.
-     - Wire `closeSearch()` to clear highlights, hide search bar, and dismiss keyboard.
+### Phase P10 — Comprehensive Regression Matrix
+- Verify F01–F22 matrix across Android API levels (24, 28, 30, 34, 36).
 
-2. **TOC Dialog (`org.wanshu.reader.ui.toc`)**:
-   - Create `TocDialog` (or full-screen dialog / bottom sheet):
-     - `RecyclerView` with `TocAdapter` displaying chapter list.
-     - Tabs/filter for "正文" (Main) and "番外" (Extra).
-     - Highlights current chapter.
-     - Displays cached status (complete vs partial vs uncached).
-     - Search input connected to `TocSearchController`:
-       - Shows search results as user types (260ms debounce).
-       - Clicking a search result or chapter navigates via `AppNavigator.openReader(bookId, entry.chapterId)` and dismisses dialog.
-     - Lazy-loading for online book `36780` ("加载全目录" button if not all 44 pages loaded).
-     - **Constraint P6.6**: Local books (`local-*`) must NOT trigger network requests!
+### Phase P11 — Performance Profiling & Optimization
+- Memory PSS, CPU, frame timing, battery profiling with auto-cache on vs off.
 
-3. **Bookmarks Dialog (`org.wanshu.reader.ui.bookmarks`)**:
-   - Create `BookmarksDialog`:
-     - Lists bookmarks for `currentBookId` from `personalRepository.getBookmarks(bookId, callback)`.
-     - Displays chapter title, paragraph snippet, creation timestamp.
-     - Clicking a bookmark navigates via `AppNavigator.openReaderWithAnchor(bookId, bm.chapterId, bm.paragraphIndex, bm.offsetUtf16)`.
-     - Delete individual bookmark via `personalRepository.deleteBookmark(id, callback)`.
-   - Reader header bar: add "添加书签" button that samples current anchor and saves snippet.
-
-4. **Settings & Cache Dialog (`org.wanshu.reader.ui.settings`)**:
-   - Create `SettingsDialog`:
-     - Theme selector (5 themes: Light, Dark, Sepia, Eyecare, OLED).
-     - Font size (+/- controls), line spacing, page margins.
-     - Switches: reading constant awake (`keepScreenAwake`), immersive mode (`immersiveMode`), prefetch next chapter (`prefetchNextChapter`), and auto-cache setting ("阅读时自动缓存").
-     - Storage stats: display chapter count and bytes from `ContentRepository.getStorageStats(bookId, callback)`.
-     - "清除缓存" button calling `ContentRepository.clearRemoteCache(bookId, callback)`. (Safety check: MUST NOT delete local books or touch `PersonalDatabase`!).
-     - Personal data export/import JSON (`reader.personal.v1` / `reader.settings.v1`).
-     - Help & keyboard shortcuts modal/info.
-
-5. **Instrumentation Tests & P6 Checklist**:
-   - Write instrumentation tests covering TOC navigation, chapter search, bookmarks, and settings.
-   - Update `docs/native-progress.md` and check off P6 in `plan.md`.
+### Phase P12 — Production Release & Handover
+- Production release build with R8, signing, GitHub release.
 
 ---
 
-### 2. Upcoming Phases (P7 to P12)
+## 4. Operational Commands Reference
 
-- **Phase P7 — Persistent Manual Download Coordinator**:
-  - `download_tasks` table + singleton `DownloadCoordinator`.
-  - App foreground gate (pauses when leaving app, resumes when returning, zero background services).
-  - Range selection: next 50 / 100 / 300 / entire book.
-  - Complete vs partial chapter verification.
-- **Phase P8 — Reading Time Auto-Cache Planner (New User Feature)**:
-  - `DownloadPlanner` pure logic: order = next 50 chapters -> rest of book to end -> previous chapters to start.
-  - `ReadingSessionGate`: only downloads when actively reading in foreground on unmetered network with battery > 20%.
-  - Pacing: 250ms initial interval, can reduce to 160ms after 10 successful pages.
-  - Spec 6.5 download progress displays (detailed stats in download panel, lightweight indicator in reader).
-- **Phase P9 — Legacy APK Migration**:
-  - Isolated migration activity with minimal `https://reader.local/` WebView bridge.
-  - Streaming IDB cursor migration in 64KiB chunks.
-  - Zero WebView creation on normal startup.
-- **Phase P10 — Comprehensive Regression Matrix**:
-  - F01–F22 verification across multiple Android API levels (API 24, 28, 30, 34, 36).
-- **Phase P11 — Performance Profiling & Optimization**:
-  - Memory, CPU, power consumption verification.
-- **Phase P12 — Production Release & Handover**:
-  - Release APK build with R8, proper signing, GitHub release assets.
-
----
-
-## 4. How the Incoming Agent Should Take Over
-
-### Step 1: Set Up the Environment
-Run this in your bash session before running Gradle or build scripts:
 ```bash
 export JAVA_HOME=/home/antony/opt/jdk-17.0.19+10
-export ANDROID_SDK_ROOT=/home/antony/android-sdk
+export ANDROID_SDK_ROOT=$HOME/android-sdk
 export PATH=$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH
-```
 
-### Step 2: Run Verification Checks to Confirm Baseline
-Verify that everything is currently green:
-```bash
-# 1. Verify zero lambdas rule (239 Java files must pass):
+# Check zero lambdas / inner classes (361 Java files must pass):
 bash tools/native/check-no-lambdas.sh
 
-# 2. Verify all native unit tests in :core and :app:
+# Run native unit tests (:core:test and :app:testDebugUnitTest):
 bash tools/native/build.sh test
 
-# 3. Verify Android debug build:
+# Build debug APK:
 bash tools/native/build.sh debug
 
-# 4. Verify web tests and TypeScript types:
+# Compile instrumentation test APK:
+./android-native/gradlew -p android-native assembleDebugAndroidTest
+
+# Verify web codebase:
 npm test
 npm run typecheck
 ```
-
-### Step 3: Key Architecture References
-- **`plan.md`**: Master blueprint for the native migration.
-- **`AGENTS.md`**: Project instructions, constraints, and operational guidelines.
-- **`docs/native-progress.md`**: Continuous progress log.
-- **`docs/native-feature-matrix.md`**: Matrix of features F01–F22.
-- **`android-native/core/src/main/java/org/wanshu/reader/core/`**: Pure Java business logic, models, parsers, schedulers, search engines.
-- **`android-native/app/src/main/java/org/wanshu/reader/`**: Android app code (Room entities/DAOs, repositories, UI controllers, views).
-
-### Step 4: Practical Coding Tips for Hand-Written Java
-- Every time you create a callback, listener, runnable, or helper:
-  - Create a new file: e.g. `TocItemClickListener.java`, `BookmarksLoadedCallback.java`.
-  - Declare it as `public class TocItemClickListener implements View.OnClickListener { ... }`.
-  - Pass references (like `controller` or `dialog`) through constructor arguments.
-  - DO NOT use anonymous classes like `new View.OnClickListener() { ... }`.
-  - DO NOT use lambdas like `v -> { ... }`.
-  - DO NOT declare static nested classes or inner classes.
-- Run `bash tools/native/check-no-lambdas.sh` immediately after creating new files.

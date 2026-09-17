@@ -25,6 +25,20 @@ public class ReaderView extends FrameLayout {
     private final LinearLayout headerBar;
     private final TextView headerTitleView;
     private final Button backButton;
+    private final Button searchButton;
+    private final Button bookmarkButton;
+    private final Button tocButton;
+    private final Button settingsButton;
+
+    private final LinearLayout searchBar;
+    private final android.widget.EditText searchEditText;
+    private final TextView searchCountView;
+    private final Button searchPrevButton;
+    private final Button searchNextButton;
+    private final Button searchCloseButton;
+
+    private final LinearLayout downloadStatusBar;
+    private final TextView downloadStatusText;
 
     private final RecyclerView recyclerView;
     private final LinearLayoutManager layoutManager;
@@ -68,7 +82,78 @@ public class ReaderView extends FrameLayout {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f);
         headerBar.addView(headerTitleView, titleParams);
 
+        searchButton = new Button(context);
+        searchButton.setText("搜索");
+        headerBar.addView(searchButton);
+
+        bookmarkButton = new Button(context);
+        bookmarkButton.setText("书签");
+        headerBar.addView(bookmarkButton);
+
+        tocButton = new Button(context);
+        tocButton.setText("目录");
+        headerBar.addView(tocButton);
+
+        settingsButton = new Button(context);
+        settingsButton.setText("设置");
+        headerBar.addView(settingsButton);
+
         root.addView(headerBar);
+
+        // 1.5 Search Bar
+        searchBar = new LinearLayout(context);
+        searchBar.setOrientation(LinearLayout.HORIZONTAL);
+        searchBar.setGravity(Gravity.CENTER_VERTICAL);
+        searchBar.setPadding(16, 8, 16, 8);
+        searchBar.setBackgroundColor(currentThemeColors.barBackground);
+        searchBar.setVisibility(View.GONE);
+
+        searchEditText = new android.widget.EditText(context);
+        searchEditText.setHint("本章搜索...");
+        searchEditText.setSingleLine(true);
+        searchEditText.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        searchEditText.setTextColor(currentThemeColors.text);
+        searchEditText.setHintTextColor(currentThemeColors.secondaryText);
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f);
+        searchBar.addView(searchEditText, editParams);
+
+        searchCountView = new TextView(context);
+        searchCountView.setText("0/0");
+        searchCountView.setPadding(16, 0, 16, 0);
+        searchCountView.setTextColor(currentThemeColors.secondaryText);
+        searchBar.addView(searchCountView);
+
+        searchPrevButton = new Button(context);
+        searchPrevButton.setText("▲");
+        searchBar.addView(searchPrevButton);
+
+        searchNextButton = new Button(context);
+        searchNextButton.setText("▼");
+        searchBar.addView(searchNextButton);
+
+        searchCloseButton = new Button(context);
+        searchCloseButton.setText("✕");
+        searchBar.addView(searchCloseButton);
+
+        root.addView(searchBar);
+
+        // 1.8 Download Status Line
+        downloadStatusBar = new LinearLayout(context);
+        downloadStatusBar.setOrientation(LinearLayout.HORIZONTAL);
+        downloadStatusBar.setGravity(Gravity.CENTER_VERTICAL);
+        downloadStatusBar.setPadding(24, 8, 24, 8);
+        downloadStatusBar.setBackgroundColor(currentThemeColors.barBackground);
+        downloadStatusBar.setVisibility(View.GONE);
+
+        downloadStatusText = new TextView(context);
+        downloadStatusText.setTextSize(12f);
+        downloadStatusText.setTextColor(currentThemeColors.secondaryText);
+        downloadStatusText.setSingleLine(true);
+        downloadStatusText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        downloadStatusBar.addView(downloadStatusText, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT
+        ));
+        root.addView(downloadStatusBar);
 
         // Frame to hold loading, error, and content
         FrameLayout bodyFrame = new FrameLayout(context);
@@ -166,12 +251,85 @@ public class ReaderView extends FrameLayout {
         retryButton.setOnClickListener(listener);
     }
 
+    public void setTocClickListener(View.OnClickListener listener) {
+        tocButton.setOnClickListener(listener);
+    }
+
+    public void setBookmarkClickListener(View.OnClickListener listener) {
+        bookmarkButton.setOnClickListener(listener);
+    }
+
+    public void setSearchToggleClickListener(View.OnClickListener listener) {
+        searchButton.setOnClickListener(listener);
+    }
+
+    public void setSettingsClickListener(View.OnClickListener listener) {
+        settingsButton.setOnClickListener(listener);
+    }
+
+    public void setSearchListeners(
+            View.OnClickListener prev,
+            View.OnClickListener next,
+            View.OnClickListener close
+    ) {
+        searchPrevButton.setOnClickListener(prev);
+        searchNextButton.setOnClickListener(next);
+        searchCloseButton.setOnClickListener(close);
+    }
+
+    public void showSearchBar() {
+        searchBar.setVisibility(View.VISIBLE);
+        searchEditText.requestFocus();
+        android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(searchEditText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    public void hideSearchBar() {
+        searchBar.setVisibility(View.GONE);
+        searchEditText.setText("");
+        searchEditText.clearFocus();
+        android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
+        }
+    }
+
+    public boolean isSearchBarVisible() {
+        return searchBar.getVisibility() == View.VISIBLE;
+    }
+
+    public void setSearchCount(int current, int total) {
+        if (total <= 0) {
+            searchCountView.setText("0/0");
+        } else {
+            searchCountView.setText(current + "/" + total);
+        }
+    }
+
+    public android.widget.EditText getSearchEditText() {
+        return searchEditText;
+    }
+
+    public ReaderBlockAdapter getAdapter() {
+        return adapter;
+    }
+
     public void applyTheme(ThemeColors colors) {
         if (colors == null) return;
         this.currentThemeColors = colors;
         setBackgroundColor(colors.background);
         headerBar.setBackgroundColor(colors.barBackground);
         headerTitleView.setTextColor(colors.text);
+        searchBar.setBackgroundColor(colors.barBackground);
+        searchEditText.setTextColor(colors.text);
+        searchEditText.setHintTextColor(colors.secondaryText);
+        searchCountView.setTextColor(colors.secondaryText);
+        downloadStatusBar.setBackgroundColor(colors.barBackground);
+        downloadStatusText.setTextColor(colors.secondaryText);
         adapter.setTypography(colors, -1, -1, -1);
     }
 
@@ -186,8 +344,28 @@ public class ReaderView extends FrameLayout {
             setBackgroundColor(colors.background);
             headerBar.setBackgroundColor(colors.barBackground);
             headerTitleView.setTextColor(colors.text);
+            searchBar.setBackgroundColor(colors.barBackground);
+            searchEditText.setTextColor(colors.text);
+            searchEditText.setHintTextColor(colors.secondaryText);
+            searchCountView.setTextColor(colors.secondaryText);
+            downloadStatusBar.setBackgroundColor(colors.barBackground);
+            downloadStatusText.setTextColor(colors.secondaryText);
         }
         adapter.setTypography(currentThemeColors, fontSizeSp, lineSpacingMultiplier, marginDp);
+    }
+
+    public void setDownloadStatus(String status) {
+        if (status != null && !status.isEmpty()) {
+            downloadStatusText.setText(status);
+            downloadStatusBar.setVisibility(View.VISIBLE);
+        } else {
+            downloadStatusBar.setVisibility(View.GONE);
+        }
+    }
+
+    public void setDownloadStatusClickListener(View.OnClickListener listener) {
+        downloadStatusBar.setOnClickListener(listener);
+        downloadStatusText.setOnClickListener(listener);
     }
 
     public void showLoading() {

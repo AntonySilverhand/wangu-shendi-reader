@@ -28,6 +28,7 @@ public class AppContainer {
     private final TextBlockBuilder textBlockBuilder;
     private final AppNavigator navigator;
     private final BackController backController;
+    private final org.wanshu.reader.download.DownloadCoordinator downloadCoordinator;
 
     public AppContainer(Context applicationContext) {
         this.applicationContext = applicationContext.getApplicationContext();
@@ -56,6 +57,16 @@ public class AppContainer {
                 this.scheduler,
                 this.httpClient,
                 new JavaBase64Decoder()
+        );
+
+        this.downloadCoordinator = new org.wanshu.reader.download.DownloadCoordinator(
+                this.contentDb,
+                this.scheduler,
+                this.httpClient,
+                this.executors,
+                this.textBlockBuilder,
+                new JavaBase64Decoder(),
+                new org.wanshu.reader.download.ReadingSessionGate(this.applicationContext)
         );
 
         this.navigator = new AppNavigator();
@@ -108,5 +119,9 @@ public class AppContainer {
 
     public BackController getBackController() {
         return backController;
+    }
+
+    public org.wanshu.reader.download.DownloadCoordinator getDownloadCoordinator() {
+        return downloadCoordinator;
     }
 }

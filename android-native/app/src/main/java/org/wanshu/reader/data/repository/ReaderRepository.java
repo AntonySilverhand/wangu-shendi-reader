@@ -84,4 +84,12 @@ public class ReaderRepository {
             scheduler.cancelAllForSubscriber(subscriberId);
         }
     }
+
+    public ContentRepository getContentRepository() {
+        return contentRepository;
+    }
+
+    public SourceHttpClient getHttpClient() {
+        return httpClient;
+    }
 }

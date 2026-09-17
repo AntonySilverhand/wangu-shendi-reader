@@ -26,19 +26,43 @@ public class AddBookmarkRunnable implements Runnable {
     @Override
     public void run() {
         try {
-            BookmarkEntity entity = new BookmarkEntity();
-            entity.id = UUID.randomUUID().toString();
-            entity.bookId = anchor.getBookId();
-            entity.chapterId = anchor.getChapterId();
-            entity.paragraphIndex = anchor.getParagraphIndex();
-            entity.offsetUtf16 = anchor.getOffsetUtf16();
-            entity.snippet = snippet;
-            entity.createdAt = System.currentTimeMillis();
+            java.util.List<BookmarkEntity> existing = db.bookmarkDao().getBookmarks(anchor.getBookId());
+            BookmarkEntity target = null;
+            if (existing != null) {
+                for (int i = 0; i < existing.size(); i++) {
+                    BookmarkEntity b = existing.get(i);
+                    if (anchor.getChapterId().equals(b.chapterId)
+                            && Math.abs(b.paragraphIndex - anchor.getParagraphIndex()) <= 1) {
+                        target = b;
+                        break;
+                    }
+                }
+            }
 
-            db.bookmarkDao().insertBookmark(entity);
+            if (target != null) {
+                target.paragraphIndex = anchor.getParagraphIndex();
+                target.offsetUtf16 = anchor.getOffsetUtf16();
+                target.snippet = snippet;
+                target.createdAt = System.currentTimeMillis();
+                db.bookmarkDao().insertBookmark(target);
+                if (callback != null) {
+                    callback.onSuccess(target);
+                }
+            } else {
+                BookmarkEntity entity = new BookmarkEntity();
+                entity.id = UUID.randomUUID().toString();
+                entity.bookId = anchor.getBookId();
+                entity.chapterId = anchor.getChapterId();
+                entity.paragraphIndex = anchor.getParagraphIndex();
+                entity.offsetUtf16 = anchor.getOffsetUtf16();
+                entity.snippet = snippet;
+                entity.createdAt = System.currentTimeMillis();
 
-            if (callback != null) {
-                callback.onSuccess(entity);
+                db.bookmarkDao().insertBookmark(entity);
+
+                if (callback != null) {
+                    callback.onSuccess(entity);
+                }
             }
         } catch (Throwable t) {
             if (callback != null) {

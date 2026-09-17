@@ -44,6 +44,10 @@ public class PersonalRepository {
         dbExecutor.execute(new GetBookmarksRunnable(db, bookId, callback));
     }
 
+    public void clearBookmarks(String bookId, CompletionCallback callback) {
+        dbExecutor.execute(new ClearBookmarksRunnable(db, bookId, callback));
+    }
+
     public void recordReadingHistory(String bookId, String chapterId, String title, CompletionCallback callback) {
         dbExecutor.execute(new RecordHistoryRunnable(db, bookId, chapterId, title, System.currentTimeMillis(), callback));
     }

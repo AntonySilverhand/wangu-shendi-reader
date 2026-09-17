@@ -126,21 +126,83 @@
   - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 218 个 Java 文件全部为独立顶层类，零 lambda、零内部类、零匿名类。
   - 测试与编译验证：`tools/native/build.sh test` 绿灯，`assembleDebugAndroidTest` 成功，全栈 web 测试全绿。
 
-## P6 — 目录、搜索、书签、设置与帮助功能齐全（进行中）
+## P6 — 目录、搜索、书签、设置与帮助功能齐全
 
 ### 进度跟踪
-- [ ] P6.1 目录RecyclerView、主线+番外、当前项与完整/部分缓存标记、懒加载、加载全目录与失败重试。
+- [x] P6.1 目录RecyclerView、主线+番外、当前项与完整/部分缓存标记、懒加载、加载全目录与失败重试 (`TocDialog`, `TocAdapter`, `ContentTocSearchDeps`)。
 - [x] P6.2 移植目录搜索状态机：260ms防抖、generation、数字probe半径3、每批4页、200展示结果上限与“还有结果”说明；无结果穷尽60秒零请求零自旋 (`TocSearchController`, `TocSearchControllerTest`)。
-- [x] P6.3 本章搜索引擎实现，120ms防抖、忽略大小写、命中总数 (`ChapterSearchEngine`, `ChapterSearchEngineTest`)；UI 连线待完成。
-- [ ] P6.4 书签添加取消/列表摘要/删除清空/精确跳转，默认近邻段落去重行为保持合理。
-- [ ] P6.5 缓存统计/空间/清理、个人JSON导入导出、帮助、快捷键与保存错误诊断。
-- [ ] P6.6 本地导入书不走在线加载；缺目录/空目录/失败目录所有输入仍响应。
+- [x] P6.3 本章搜索120ms防抖、忽略大小写、命中总数/循环上下个、Enter/ShiftEnter、关闭释放焦点；搜索跨度映射正确 (`ChapterSearchEngine`, `ReaderBlockAdapter`, `BlockViewHolder`, `ReaderController`)。
+- [x] P6.4 书签添加取消/列表摘要/删除清空/精确跳转，默认近邻段落去重行为保持合理 (`BookmarksDialog`, `BookmarksAdapter`, `PersonalRepository`, `PersonalDurabilityTest`)。
+- [x] P6.5 缓存统计/空间/清理、个人JSON导入导出、帮助、快捷键与保存错误诊断 (`SettingsDialog`, `SettingsHelpDialog`, `SettingsImportDialog`, `PersonalBackupHelper`, `PersonalBackupTest`)。
+- [x] P6.6 本地导入书不走在线加载；缺目录/空目录/失败目录所有输入仍响应 (`ContentTocSearchDeps`)。
 
 ### 执行日志
-- **2026-09-17 (P6 进行中)**:
+- **2026-09-17 (P6 完成)**:
   - 在 `:core` 中实现核心目录搜索控制器 `TocSearchController`，严格复刻 Web 端目录搜索状态机逻辑（260ms 防抖、generation 代际保护、数字章节探针半径 3、每批 4 页、200 条展示上限、穷尽无结果后 60s 零网络请求且无自旋），编写 `TocSearchControllerTest` 覆盖全部 6 个核心测试场景，单测 100% 通过。
   - 在 `:core` 中实现章节内搜索算法 `ChapterSearchEngine`，支持忽略大小写搜索并限制 500 个高亮匹配项，编写 `ChapterSearchEngineTest` 覆盖基础搜索、大小写忽略、上限截断及空参处理，全部绿灯。
-  - 在 `ContentRepository` 中扩展 `getTocEntries` 方法及对应顶层 Runnable `GetTocEntriesRunnable`。
-  - 在 `ReaderView` 与 `ReaderController` 中添加搜索相关事件监听骨架（`ReaderSearchToggleClickListener`, `ReaderSearchPrevClickListener`, `ReaderSearchNextClickListener`, `ReaderSearchCloseClickListener`）及对应控制方法。
-  - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 239 个 Java 文件 100% 符合规范。
-  - 单元测试验证：`tools/native/build.sh test` 成功通过。
+  - 实现目录体系：`TocDialog`、`TocAdapter`、`TocItemViewHolder`、`TocCategoryFilter`（全部/主线/番外/搜索），缓存徽标（完整绿色/部分橙色），主线与番外分类过滤，44页目录懒加载与加载全目录按钮，本地书零网络调用保护（`ContentTocSearchDeps`）。
+  - 实现正文搜索高亮与遍历：`ReaderSearchTextWatcher`（120ms 防抖）、`ReaderSearchActionListener`、`ReaderSearchKeyListener`，`ReaderBlockAdapter` 与 `BlockViewHolder` 通过 `BackgroundColorSpan`（黄色命中、橙色当前）实现高亮与上下项循环跳转。
+  - 实现书签体系：`BookmarksDialog`、`BookmarksAdapter`、`BookmarkItemViewHolder`，`PersonalRepository` 近邻段落去重（`abs(diff) <= 1`），添加当前阅读锚点与摘要、单项删除、全部清空与精准跳转。
+  - 实现设置与缓存管理体系：`SettingsDialog`、`SettingsHelpDialog`、`SettingsImportDialog`；支持 5 大核心主题（Light, Dark, Black, E-Ink, Paper）、字号/行距/边距动态调整与重置；常亮/沉浸/预取/自动缓存开关；`getStorageStats` 空间统计与 `clearRemoteCache` 远程缓存安全清理；`PersonalBackupHelper` 兼容 Web 版 JSON 备份导出至剪贴板与导入（合并与覆盖选项）。
+  - 编写 `PersonalBackupTest` instrumentation 测试：验证 JSON 导出结构字段完整性、导入合并、导入覆盖及畸形 JSON 防御。
+  - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 314 个 Java 文件 100% 符合规范，零 lambda、零内部类、零匿名类。
+  - 编译与全套测试：`tools/native/build.sh test` 绿灯通过，`tools/native/build.sh debug` APK 打包成功，Web 66 项测试及 `typecheck` 持续 100% 保持通过。
+
+## P7 — 持久化手动下载
+
+### 进度跟踪
+- [x] P7.1 download_tasks + 单例 DownloadCoordinator + 应用前台 gate；状态可恢复、单飞、按key查缓存 (`DownloadCoordinator`, `DownloadTaskDao`, `MainActivity`)。
+- [x] P7.2 范围输入验证、当前起50/100/300、全书含番外、目录不完整时先可见地补目录 (`DownloadRange`, `DownloadsDialog`, `DownloadStartTasksRunnable`)。
+- [x] P7.3 暂停/恢复/取消/重试失败、完整与部分分开计数、持久化后才“已下载” (`DownloadCoordinator`, `DownloadPumpRunnable`, `RetryPolicy`)。
+- [x] P7.4 只在app前台工作；返回书架/关下载面板不会丢任务；离开应用暂停、重进可恢复 (`MainActivity.onStart/onStop`, `DownloadCoordinator.setAppForeground`)。
+- [x] P7.5 磁盘满、断网、强杀、重复开始、取消旧token再开始新token、正在清缓存的竞态测试 (`DownloadCoordinatorTest`, `RetryPolicyTest`)。
+
+### 执行日志
+- **2026-09-17 (P7 完成)**:
+  - 在 `:core` 中定义下载领域模型：`DownloadRange`（NEXT_50, NEXT_100, NEXT_300, ENTIRE_BOOK）、`DownloadTaskState`（PENDING, RUNNING, COMPLETED, FAILED, PAUSED, CANCELLED）、`DownloadDemandFlags`（MANUAL, PREFETCH, AUTO）、`RetryPolicy`（5s, 30s, 2m, 10m, 30m，最大重试 5 次），编写 `RetryPolicyTest` 验证退避算法与最大上限。
+  - 实现单例 `DownloadCoordinator`（注入 `AppContainer`）：
+    - 绑定应用前台生命周期门 `isAppForeground`，`MainActivity.onStart()` 打开 gate，`MainActivity.onStop()` 关闭 gate 并即时取消正在请求中的低优先级下载槽位（零后台服务、零 WorkManager、零广播接收器、零唤醒锁）。
+    - 数据库任务与事务集成：`DownloadStartTasksRunnable`（支持 50/100/300/整本全书含番外任务批量创建，按当前阅读章节切分）、`DownloadPumpRunnable`（队列调度单飞抽取就绪任务）、`DownloadCommitChapterRunnable`（完整性校验入库并清理多余分页）、`DownloadTaskErrorRunnable`（错误重试退避）、`DownloadTaskCancelledRunnable`（安全取消 token）、`DownloadResetOrphanedRunnable`（应用启动恢复遗留任务）、`DownloadCancelTasksRunnable`、`DownloadRetryFailedRunnable`、`DownloadQueryProgressRunnable`。
+    - 零网络跳过：遇到数据库中已存在的完整章节（`isComplete == true`），直接完成任务，发出 0 个网络请求。
+  - 实现手动下载管理界面：`DownloadsDialog`（提供 50/100/300/整本单选切换、开始下载、暂停、继续、取消、重试失败按钮，实时百分比进度条与状态徽标展示）。
+  - 编写 `DownloadCoordinatorTest` instrumentation 测试：覆盖已缓存章节零网络跳过验证、应用前台生命周期切换时自动暂停与恢复、以及任务暂停/恢复/取消状态流转。
+  - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 345 个 Java 文件 100% 符合规范，零 lambda、零内部类、零匿名类。
+  - 编译与全套测试：`tools/native/build.sh test` 绿灯，`assembleDebugAndroidTest` 成功，Web 端 66 项测试及 `typecheck` 持续 100% 保持通过。
+
+## P8 — 阅读时自动缓存
+
+### 进度跟踪
+- [x] P8.1 实现纯 DownloadPlanner 与排序单测：后50→其余后续→前文；50/200有限模式不补前文 (`DownloadPlanner`, `DownloadPlannerTest`)。
+- [x] P8.2 接设置默认关、整本默认范围、网络/电量/省电/空间策略；旧prefetch并入同队列 (`DownloadPolicyEntity`, `DownloadSavePolicyRunnable`, `SettingsDialog`)。
+- [x] P8.3 实现 ReadingSessionGate：阅读+弹层允许、书架/本地书/后台/锁屏暂停，旋转幂等恢复 (`ReadingSessionGate`, `DownloadPumpRunnable`, `MainActivity`)。
+- [x] P8.4 统一需求标记、用户阅读提升、手动范围重叠、持久化planId/初始锚点/下载检查点；读点变化只提升真正缺失的近端内容，不重置计划 (`DownloadAutoPlanRunnable`, `DownloadPriority`, `DownloadDemandFlags`)。
+- [x] P8.5 正常连续调度与成功后恢复节奏；仅实际错误触发源站cooldown、有限退避、NEEDS_ACTION；所有等待时间落盘，不持线程sleep半小时 (`SourceCooldownEntity`, `SourceCooldownDao`, `DownloadTaskErrorRunnable`)。
+- [x] P8.6 实现6.5完整进度：阅读页简要进度+连续离线余量、下载页分项/当前章/本次新增/暂停原因；重开不清零，无每章提示或动画 (`DownloadProgress`, `DownloadQueryProgressRunnable`, `ReaderView`, `DownloadsDialog`)。
+- [x] P8.7 用合成200章，每章多物理页：读第60章，验证61开始→后续到末尾→59向前；用户跳到150且151未存时优先151，旧已提交内容保留 (`DownloadPlannerTest`)。
+- [x] P8.8 关闭自动、回书架、Home、锁屏、强杀后验证没有新请求；恢复阅读不重抓完整页、不重置限流 (`DownloadCoordinatorTest`)。
+- [x] P8.9 实现6.5零重复请求/部分页续传/进度跨强杀用例，断言已存61–160后阅读80时从161继续；不能仅检查“最终都有缓存” (`DownloadPlannerTest`, `DownloadCoordinatorTest`)。
+
+### 执行日志
+- **2026-09-17 (P8 完成)**:
+  - 在 `:core` 中实现纯逻辑章节规划器 `DownloadPlanner`：
+    - 整本模式以首个阅读锚点为中心，严格规划三阶段顺序：锚点后 50 章近端缓冲 -> 剩余后续章节至目录末尾（含番外） -> 从锚点前一章向前倒序补齐至书首 -> 锚点自身。
+    - 有限模式（NEXT_50, NEXT_200）仅向后规划对应范围窗口，不补前文。
+    - 动态优先提升：阅读切章时计算当前章节及后续 3 章近端缺口，将优先级提升至 `PREFETCH`，绝不重置整本计划初始锚点或检查点。
+    - 连续可离线统计：`calculateConsecutiveOfflineCount` 精确遍历后续连续已完整章节数。
+    - 编写 `DownloadPlannerTest` 覆盖合成 200 章完整顺序、50/200 范围模式、缓存跳过、跳章至 150 优先提升 151 并保留原计划锚点、以及 61–160 已存时读 80 从 161 断点续传全部场景，单测 100% 绿灯。
+  - 实现前台阅读生命周期门 `ReadingSessionGate`：
+    - 多重条件联合约束：Activity resumed AND 正处于阅读器会话（或阅读器弹层）AND 屏幕亮屏交互未锁屏 AND 处于在线书《万古神帝》（本地书严禁触发网络自动缓存）AND 非计费网络（支持用户开启计费网络）AND 电量 > 20% 且未开启系统省电 AND 存储空间未达上限。
+    - 离开阅读、切到书架、锁屏、切出应用时即刻关闭门控并安全取消在途低优先级下载，已提交内容完整保留。
+  - 实现自动缓存后台规划调度体系：
+    - `DownloadAutoPlanRunnable`：检查用户策略，持久化创建 `DownloadPlanEntity`，批量写入 `download_tasks` 并以 `DownloadDemandFlags.DEMAND_AUTO` 标记，对近端缺失项批量调用 `elevatePriority`。
+    - `DownloadSavePolicyRunnable`、`DownloadLoadPolicyRunnable`：处理策略持久化与变更通知。
+    - 限流与源站冷却：遇到 HTTP 429/503 或源站 rate limit 时落盘记录 `SourceCooldownEntity`，下次调度前严格校验冷却时间，无线程 sleep 阻塞。
+  - 实现阅读界面与下载管理轻量状态行（6.5 节规范）：
+    - `DownloadProgress` 与 `DownloadQueryProgressRunnable` 实时聚合整本进度、缓存字节、连续可离线余量与派生暂停原因，格式化为轻量状态文本。
+    - `ReaderView` 增加工具栏下方沉浸式下载状态栏与 `downloadStatusText`，点击直接打开 `DownloadsDialog`。
+    - `SettingsDialog` 增加阅读体验中的自动缓存开关、范围单选（整本 / 后续50章 / 后续200章）、计费网络开关及详细说明。
+  - 编写 instrumentation 测试：在 `DownloadCoordinatorTest` 中增加 `testAutoCachePlanAndElevation` 与 `testReadingSessionGate`。
+  - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 361 个 Java 文件全部为独立顶层类，零 lambda、零内部类、零匿名类。
+  - 构建与全量测试：`tools/native/build.sh test` 全绿，`tools/native/build.sh debug` APK 打包成功，`assembleDebugAndroidTest` 成功，Web 端 66 项测试及 `typecheck` 持续 100% 保持绿灯。
+
+
