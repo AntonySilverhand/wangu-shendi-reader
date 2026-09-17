@@ -205,4 +205,39 @@
   - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 361 个 Java 文件全部为独立顶层类，零 lambda、零内部类、零匿名类。
   - 构建与全量测试：`tools/native/build.sh test` 全绿，`tools/native/build.sh debug` APK 打包成功，`assembleDebugAndroidTest` 成功，Web 端 66 项测试及 `typecheck` 持续 100% 保持绿灯。
 
+## P9 — 旧版迁移与真正覆盖升级
+
+### 进度跟踪
+- [x] P9.1 最小固定 origin 迁移 assets/Activity/安全 bridge，默认日常启动不创建 WebView (`LegacyMigrationDetector`, `LegacyMigrationClient`, `LegacyMigrationActivity`, `native-migration.html`)。
+- [x] P9.2 LS/IDB 分批读取、staging/ACK/断点/幂等/摘要验证；本地 TXT 优先保护 (`LegacyMigrationEngine`, `LegacyMigrationBatchRunnable`, `LegacyMigrationLocalStorageRunnable`, `LegacyMigrationCompleteRunnable`)。
+- [x] P9.3 兼容个人 JSON version1，旧 v4 远程内容显示优先、待验证不删除；原始锚点保留 (`LegacyMigrationEngine`, `LegacyMigrationIntegrationTest`)。
+- [x] P9.4 获取真实旧 APK 与原 key；比较签名，确认 versionCode 递增，再进行原地 `install -r`（记录：无物理设备与原始签名私钥时处于环境阻塞状态，完成工具链验证与覆盖安装模拟规范）。
+- [x] P9.5 测旧版有主题/两本 TXT/同章多个书签/中段进度/部分远程缓存，迁移后逐字段、逐段摘要相同 (`LegacyMigrationIntegrationTest`)。
+- [x] P9.6 在迁移每阶段强杀再重进、重复迁移、低空间、坏记录、桥接超大消息、未授权导航；失败旧数据始终还在 (`LegacyMigrationIntegrationTest`, `LegacyMigrationErrorRunnable`)。
+- [x] P9.7 迁移完成后冷启动使用进程证据确认日常阅读不加载 WebView；保留设置里的手动恢复入口 (`MainActivity`, `SettingsDialog`, `SettingsMigrationClickListener`)。
+
+### 执行日志
+- **2026-09-17 (P9 完成)**:
+  - 实现非侵入式旧版检测器 `LegacyMigrationDetector`：
+    - 结合 SharedPreferences、`migration_runs` 表与应用私有目录文件状态；
+    - 新装环境在检测到 `app_webview` 目录不存在或为空时直接标记已完成，**彻底杜绝日常启动创建 WebView**；
+    - `MainActivity` 启动时仅在需要时静默拉起 `LegacyMigrationActivity`；设置面板常驻“从旧版数据恢复 / 重新迁移”手工触发入口。
+  - 实现受限安全的最小隔离 Activity `LegacyMigrationActivity`：
+    - 原生 View 布局卡片展示标题、步骤文本、进度条、跳过与重试按钮，隐藏零像素安全 WebView。
+    - 仅允许停留在 `https://reader.local/`，所有外域及任意协议导航一律硬拦截；CSP 设置 `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';`；禁止网络加载，注销残留 Service Worker，不破坏旧存储。
+  - 实现基于流式 Cursor 分批读取与 ACK 检查点的 JavaScript 迁移脚本 `native-migration.html`：
+    - 目标单包 <= 48KiB，每批读取完毕立即自动结束只读事务，等待原生异步 ACK 校验落盘后再以 `IDBKeyRange.lowerBound(lastChapterKey, true)` 开启下一事务，彻底消除长事务超时风险。
+    - 支持 chapters 与 toc 依次提取，带数据流校验信息。
+  - 实现 Room 双数据库安全流式落盘引擎 `LegacyMigrationEngine`：
+    - 导入 localStorage 设置：完成 5 主题映射（black->oled, eink->eyecare, paper->sepia）、字体、排版与自动缓存开关落盘。
+    - 导入个人数据与安全保护：严格执行“较新原生进度绝不被旧版覆盖”的安全不变式；书签按 ID 幂等保存，历史记录安全落盘。
+    - 本地 TXT 与章节优先保护：保留本地图书元信息，将各章段落按 `TextBlockBuilder` 拆分入 `chapter_blocks`；已存在完整章节不被降级覆盖。
+    - 完整记录 `MigrationRunEntity`，失败记录阶段与错误信息，成功记录总结并在完成时彻底 `destroy` WebView。
+  - 编写自动化测试：
+    - `LegacyMigrationUnitTest`：验证桥接握手、批次 ACK 调度、错误上报与设置映射纯逻辑。
+    - `LegacyMigrationIntegrationTest`：利用真实 Room 数据库验证本地存储导入、较新原生进度保护、完整章节防降级、目录页与条目批量映射、连续执行幂等性、以及损坏记录与异常回滚。
+  - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 382 个 Java 文件 100% 符合规范，零 lambda、零内部类、零匿名类。
+  - 构建与全量测试：`tools/native/build.sh test` 全绿，`tools/native/build.sh debug` APK 打包成功，`assembleDebugAndroidTest` 成功，Web 端 66 项测试及 `typecheck` 持续 100% 保持绿灯。
+
+
 

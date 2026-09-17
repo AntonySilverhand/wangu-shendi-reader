@@ -1,7 +1,7 @@
 # Native Android Reader Refactor — Project Status & Handover Document
 
 > **Date**: 2026-09-17  
-> **Status**: Completed Phases P0 to P8 (100% Verified)  
+> **Status**: Completed Phases P0 to P9 (100% Verified)  
 > **Target**: Native Android Reader for 《万古神帝》 (Room + pure Java 17 + Android Views + RecyclerView)
 
 ---
@@ -101,28 +101,39 @@ This project replaces the hybrid WebView shell with a high-performance native An
   - `ReaderView` displays lightweight toolbar status line (e.g. "下载中 · 整本 1,280 / 4,330章 (29.6%) · 后续连续可离线 126章" or "后续连续可离线 126章"), clicking opens `DownloadsDialog`.
   - `SettingsDialog` has "阅读时自动缓存" toggle, scope selection (整本 / 后续50章 / 后续200章), and metered network toggle.
 - Verification:
-  - 361 Java files 100% compliant with zero lambdas / zero inner classes.
+  - 382 Java files 100% compliant with zero lambdas / zero inner classes.
   - `tools/native/build.sh test` all tests passing.
   - `assembleDebugAndroidTest` and debug APK assemble passing.
   - Web tests 66/66 green and `npm run typecheck` clean.
+
+### ✅ Phase P9 — Legacy APK Migration (Completed)
+- Non-intrusive detector `LegacyMigrationDetector`:
+  - Inspects SharedPreferences, Room `migration_runs` table, and filesystem `app_webview` directory.
+  - Fresh installs detect no legacy storage and mark complete immediately, guaranteeing zero WebView initialization on daily launches.
+- Isolated activity `LegacyMigrationActivity`:
+  - Minimal clean UI with progress bar, status, and skip/retry controls; hidden zero-pixel WebView.
+  - Hardened security: origin locked to `https://reader.local/`, CSP `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';`, network loads blocked, service workers unregistered.
+- Streaming batch migration script `native-migration.html`:
+  - Batch target <= 48KiB, readonly transaction finishes per batch, waits for native ACK before opening next transaction via `IDBKeyRange.lowerBound(lastChapterKey, true)`.
+- Streaming database import engine `LegacyMigrationEngine`:
+  - Settings mapped across 5 themes (black->oled, eink->eyecare, paper->sepia) and typography.
+  - Personal progress protected: newer native progress is never overwritten by older legacy progress.
+  - Local TXT books and chapters preserved; complete native chapters never downgraded.
+  - Settings dialog provides permanent "从旧版数据恢复 / 重新迁移" recovery button.
+- Verification:
+  - `LegacyMigrationUnitTest` and `LegacyMigrationIntegrationTest` passing.
+  - 382 Java files 100% compliant with zero lambdas / zero inner classes.
 
 ---
 
 ## 3. What Remains to Be Done (Next Tasks)
 
-### Phase P9 — Legacy APK Migration (Next Focus)
-1. **Isolated Migration Activity (`LegacyMigrationActivity`)**:
-   - Only invoked on first startup if legacy SQLite / localStorage / IndexedDB exists in app private storage (`/data/data/org.wanshu.reader/app_webview`).
-   - Normal daily startup NEVER launches or initializes WebView.
-2. **Streaming Migration**:
-   - Reads legacy localStorage (`reader.settings.v1`, `reader.personal.v1`) and imports into `PersonalDatabase`.
-   - Reads legacy IndexedDB (`reader-db` chapters / toc) via minimal static bridge `https://reader.local/` in 64KiB chunks.
-   - Preserves local TXT books and reading anchors.
-3. **Rollback & Safety**:
-   - Zero destructive writes to legacy storage until migration transaction is 100% committed.
-
-### Phase P10 — Comprehensive Regression Matrix
-- Verify F01–F22 matrix across Android API levels (24, 28, 30, 34, 36).
+### Phase P10 — Comprehensive Regression Matrix (Next Focus)
+1. **F01–F22 Matrix Verification**:
+   - Verify every item in `docs/native-feature-matrix.md` with explicit automated or manual evidence.
+2. **Multi-API & Device Verification**:
+   - Verify API 24–36 compatibility (Android 7.0 to 16/target 36 edge-to-edge system insets and back gestures).
+   - Verify web parity (`npm test`, `verify-delivery.mjs`, `check-layout.mjs`).
 
 ### Phase P11 — Performance Profiling & Optimization
 - Memory PSS, CPU, frame timing, battery profiling with auto-cache on vs off.

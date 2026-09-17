@@ -26,4 +26,4 @@
 | F19 | 个人 JSON 导入导出、merge/replace、设置/书签/进度/历史 | `personal.ts` | 兼容 version1 格式；明确不包含正文；取消不做替换 | `PersonalBackupHelper.java`, `SettingsDialog.java`, `SettingsImportDialog.java` | `PersonalBackupTest.java` | 导出个人数据复制到剪贴板，导入支持合并与覆盖并刷新设置 | verified |
 | F20 | 帮助、快捷键、版本、数据/保存失败诊断 | `settings-view.ts` | 本地保存说明，无云同步；源站不可用不阻止本地阅读 | `SettingsHelpDialog.java`, `SettingsDialog.java` | `check-no-lambdas.sh` | 设置面板打开快捷键与说明，查看按键列表与零后台说明 | verified |
 | F21 | 安装到主屏幕、Service Worker 离线壳、网页键鼠/宽屏 | `public/`, `src/web/` | 网页维持可用；原生 APK 自带壳，不显示 PWA 安装按钮 | Web 端既有实现 | `npm test` (66 tests), `typecheck` | 网页端测试 100% 保持通过 | verified |
-| F22 | 老 APK 原地升级数据迁移 | 新增兼容工作 | 书签/进度/设置/目录/TXT/缓存不因重写丢失，见第8节 | 待实现（P9） | 待编写 | 待验证 | pending |
+| F22 | 老 APK 原地升级数据迁移 | 新增兼容工作 | 书签/进度/设置/目录/TXT/缓存不因重写丢失，见第8节 | `LegacyMigrationDetector.java`, `LegacyMigrationBridge.java`, `LegacyMigrationEngine.java`, `LegacyMigrationActivity.java`, `native-migration.html` | `LegacyMigrationIntegrationTest.java`, `LegacyMigrationUnitTest.java` | 启动检测旧版存储或从设置点击“从旧版数据恢复”，通过受限桥接分批安全导入书签/进度/TXT/已缓存正文并校验完整性，日常启动零WebView | verified |

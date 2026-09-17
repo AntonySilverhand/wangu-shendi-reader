@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+  <title>Native Migration</title>
+</head>
+<body>
+<div id="status">Ready</div>
+<script>
+(function() {
+  var runId = 'mig-' + Date.now();
+  var DB_NAME = 'reader-db';
+  var DB_VERSION = 1;
+  var STORE_CHAPTERS = 'chapters';
+  var STORE_TOC = 'toc';
+
+  // 1. Unregister any existing service workers on https://reader.local/
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        if (regs && regs.length) {
+          for (var i = 0; i < regs.length; i++) {
+            regs[i].unregister();
+          }
+        }
+      }).catch(function(e) {});
+    } catch (e) {}
+  }
+
+  function reportError(stage, message) {
+    if (window.NativeMigration && window.NativeMigration.onMigrationError) {
+      window.NativeMigration.onMigrationError(runId, stage, String(message));
+    }
+  }
+
+  function reportStatus(text) {
+    var el = document.getElementById('status');
+    if (el) el.textContent = text;
+  }
+
+  // Native callback hooks
+  window.onLocalStorageAck = function(success) {
+    if (!success) {
+      reportError('localstorage_ack', 'Failed to save localstorage on native');
+      return;
+    }
+    openIndexedDbAndMigrate();
+  };
+
+  var pendingAckResolve = null;
+  window.onBatchAck = function(storeName, batchIndex, lastKey, isLast) {
+    if (pendingAckResolve) {
+      var fn = pendingAckResolve;
+      pendingAckResolve = null;
+      fn(true);
+    }
+  };
+
+  function startMigration() {
+    reportStatus('Starting handshake...');
+    if (!window.NativeMigration) {
+      reportError('bridge_missing', 'window.NativeMigration bridge interface not found');
+      return;
+    }
+
+    try {
+      window.NativeMigration.onHandshake('1.0');
+    } catch (e) {
+      reportError('handshake_failed', e);
+      return;
+    }
+
+    // Step 1: Read localStorage
+    reportStatus('Reading localStorage...');
+    try {
+      var settings = localStorage.getItem('reader.settings.v1') || '';
+      var personal = localStorage.getItem('reader.personal.v1') || '';
+      var localbooks = localStorage.getItem('reader.localbooks.v1') || '';
+      window.NativeMigration.onLocalStorageData(settings, personal, localbooks);
+    } catch (e) {
+      reportError('localstorage_read', e);
+    }
+  }
+
+  function openIndexedDbAndMigrate() {
+    reportStatus('Opening IndexedDB...');
+    var req;
+    try {
+      req = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (e) {
+      reportError('idb_open_exception', e);
+      return;
+    }
+
+    var wasUpgraded = false;
+    req.onupgradeneeded = function(e) {
+      wasUpgraded = true;
+    };
+
+    req.onerror = function(e) {
+      reportError('idb_open_error', e.target ? e.target.error : 'unknown');
+    };
+
+    req.onblocked = function() {
+      reportError('idb_blocked', 'IndexedDB open was blocked');
+    };
+
+    req.onsuccess = function(e) {
+      var db = req.result;
+      if (wasUpgraded || !db.objectStoreNames.contains(STORE_CHAPTERS)) {
+        try { db.close(); } catch (ignored) {}
+        window.NativeMigration.onMigrationComplete(runId, JSON.stringify({ chaptersCount: 0, tocCount: 0 }));
+        return;
+      }
+
+      migrateChapters(db, function(chaptersCount) {
+        migrateToc(db, function(tocCount) {
+          try { db.close(); } catch (ignored) {}
+          window.NativeMigration.onMigrationComplete(runId, JSON.stringify({
+            chaptersCount: chaptersCount,
+            tocCount: tocCount
+          }));
+        });
+      });
+    };
+  }
+
+  function migrateChapters(db, onFinished) {
+    reportStatus('Migrating chapters...');
+    var totalChapters = 0;
+    var currentBatchIndex = 0;
+    var lastChapterKey = null;
+
+    function processNextBatch() {
+      var tx;
+      try {
+        tx = db.transaction(STORE_CHAPTERS, 'readonly');
+      } catch (e) {
+        reportError('chapters_tx_create', e);
+        return;
+      }
+      var store = tx.objectStore(STORE_CHAPTERS);
+      var range = lastChapterKey ? IDBKeyRange.lowerBound(lastChapterKey, true) : null;
+      var curReq = store.openCursor(range);
+
+      var batch = [];
+      var batchBytes = 0;
+      var MAX_BATCH_BYTES = 48 * 1024; // 48 KB target
+      var batchLastKey = null;
+
+      curReq.onerror = function(err) {
+        reportError('chapters_cursor_error', err.target ? err.target.error : 'unknown');
+      };
+
+      curReq.onsuccess = function(ev) {
+        var cursor = ev.target.result;
+        if (!cursor) {
+          if (batch.length > 0) {
+            totalChapters += batch.length;
+            sendBatch(batch, currentBatchIndex, true, function() {
+              onFinished(totalChapters);
+            });
+          } else {
+            onFinished(totalChapters);
+          }
+          return;
+        }
+
+        var val = cursor.value;
+        batchLastKey = cursor.key;
+        var valStr = JSON.stringify(val);
+        batch.push(val);
+        batchBytes += valStr.length;
+
+        if (batchBytes >= MAX_BATCH_BYTES) {
+          totalChapters += batch.length;
+          lastChapterKey = batchLastKey;
+          sendBatch(batch, currentBatchIndex, false, function() {
+            currentBatchIndex++;
+            processNextBatch();
+          });
+        } else {
+          cursor.continue();
+        }
+      };
+    }
+
+    function sendBatch(batch, bIndex, isLast, callback) {
+      pendingAckResolve = callback;
+      var json = JSON.stringify(batch);
+      var checksum = 'len:' + json.length + ':items:' + batch.length;
+      window.NativeMigration.onIndexedDbBatch(runId, STORE_CHAPTERS, json, bIndex, isLast, checksum);
+    }
+
+    processNextBatch();
+  }
+
+  function migrateToc(db, onFinished) {
+    if (!db.objectStoreNames.contains(STORE_TOC)) {
+      onFinished(0);
+      return;
+    }
+    reportStatus('Migrating TOC...');
+    try {
+      var tx = db.transaction(STORE_TOC, 'readonly');
+      var store = tx.objectStore(STORE_TOC);
+      var curReq = store.openCursor();
+      var batch = [];
+
+      curReq.onsuccess = function(ev) {
+        var cursor = ev.target.result;
+        if (!cursor) {
+          if (batch.length > 0) {
+            var json = JSON.stringify(batch);
+            var checksum = 'len:' + json.length + ':items:' + batch.length;
+            pendingAckResolve = function() {
+              onFinished(batch.length);
+            };
+            window.NativeMigration.onIndexedDbBatch(runId, STORE_TOC, json, 0, true, checksum);
+          } else {
+            onFinished(0);
+          }
+          return;
+        }
+        batch.push(cursor.value);
+        cursor.continue();
+      };
+      curReq.onerror = function(err) {
+        reportError('toc_cursor_error', err.target ? err.target.error : 'unknown');
+      };
+    } catch (e) {
+      reportError('toc_tx_create', e);
+    }
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    startMigration();
+  } else {
+    document.addEventListener('DOMContentLoaded', startMigration);
+  }
+})();
+</script>
+</body>
+</html>

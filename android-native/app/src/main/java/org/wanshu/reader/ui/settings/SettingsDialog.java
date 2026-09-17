@@ -330,6 +330,11 @@ public class SettingsDialog extends Dialog {
         backupRow.addView(importBtn, btnParams);
         body.addView(backupRow);
 
+        Button migrateBtn = new Button(ctx);
+        migrateBtn.setText("从旧版数据恢复 / 重新迁移");
+        migrateBtn.setOnClickListener(new SettingsMigrationClickListener(ctx, this));
+        body.addView(migrateBtn);
+
         // Section F: 帮助与快捷键
         TextView sectionHelp = makeSectionHeader(ctx, "关于与帮助", textCol);
         sectionHelp.setPadding(0, 16, 0, 8);

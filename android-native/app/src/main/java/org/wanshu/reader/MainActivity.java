@@ -68,6 +68,11 @@ public class MainActivity extends Activity {
         container.getNavigator().addListener(navigationListener);
 
         container.getPersonalRepository().getLastRoute(new MainLastRouteCallback(this));
+
+        if (org.wanshu.reader.migration.LegacyMigrationDetector.shouldPromptMigration(this, container.getPersonalDb())) {
+            Intent migrationIntent = new Intent(this, org.wanshu.reader.migration.LegacyMigrationActivity.class);
+            startActivity(migrationIntent);
+        }
     }
 
     @Override
