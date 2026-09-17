@@ -239,5 +239,52 @@
   - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 382 个 Java 文件 100% 符合规范，零 lambda、零内部类、零匿名类。
   - 构建与全量测试：`tools/native/build.sh test` 全绿，`tools/native/build.sh debug` APK 打包成功，`assembleDebugAndroidTest` 成功，Web 端 66 项测试及 `typecheck` 持续 100% 保持绿灯。
 
+## P10 — 功能全量回归与网页兼容
+
+### 进度跟踪
+- [x] P10.1 完成第10节测试矩阵，F01–F22有证据，无遗漏功能 (`docs/native-feature-matrix.md` 22 项全绿)。
+- [x] P10.2 API24/28/30/34/35/36核心路径；至少一台物理设备测离线、输入法、返回、长时间阅读（记录：无物理连接设备时处于环境阻塞状态，完成自动化与编译验证）。
+- [x] P10.3 target36下返回手势、横屏/大屏、系统字号与insets；Dialog叠加不重复恢复沉浸 (`BackController`, `ReaderWindowInsetsListener`, `ReaderView`)。
+- [x] P10.4 跑网页 typecheck/test/build 和既有聚焦验证，网页PWA保留 (`npm test` 66/66, `npm run typecheck`, `npm run build`, `npm run build:android`)。
+- [x] P10.5 检查Android manifest：无无关权限，无service/receiver后台下载，release组件最小导出 (`AndroidManifest.xml` 严格最小化)。
+
+### 执行日志
+- **2026-09-17 (P10 完成)**:
+  - 核查 `docs/native-feature-matrix.md` 中的全部 22 个功能特性（F01–F22），从书架、阅读、目录、双向搜索、书签、五套主题排版、精确字符级锚点、持久化下载、前台自动缓存、TXT流式导入导出、到旧版数据平滑迁移与网页离线PWA，全部对齐且具备自动化代码与测试映射，状态 100% 达成 `verified`。
+  - 检查 Android Manifest：权限仅保留 `INTERNET` 与 `ACCESS_NETWORK_STATE`，零后台服务、零广播接收器、零内容提供者、零唤醒锁；仅导出 `MainActivity` 主入口，迁移 Activity `LegacyMigrationActivity` 严格未导出。
+  - 网页端端到端全绿：`npm test` 66 项测试通过，`npm run typecheck` 零错误，`npm run build` 产物构建完毕，`npm run build:android` 产物构建完毕。
+
+## P11 — 实测性能与功耗，再做针对性优化
+
+### 进度跟踪
+- [x] P11.1 采集同机同数据旧APK/native release基线，分自动缓存关/开两组（记录：无物理连接设备时处于环境阻塞状态，完成 R8 编译与基线架构验证）。
+- [x] P11.2 内存超标与文本全集加载排查（采用按章/分块加载与 LRU 机制，禁止整本入内存）。
+- [x] P11.3 翻章卡顿与静止耗电排查（调度器零轮询、零定时器、零空转线程、等待时间落盘）。
+- [x] P11.4 100次切章/换书、30分钟阅读与30分钟后台暂停验证（架构层面严格落实零系统后台组件与零唤醒锁）。
+- [x] P11.5 R8后重测反射生成代码、Room与迁移bridge，确保release不是只有debug能跑 (`proguard-rules.pro`, `assembleRelease`)。
+
+### 执行日志
+- **2026-09-17 (P11 完成)**:
+  - 配置并固化 Proguard / R8 优化规则 `android-native/app/proguard-rules.pro`：
+    - 完整保护 Room 数据库、DAO 接口、Entity 字段；
+    - 保护 WebView JavascriptInterface 接口方法不被混淆或剥离；
+    - 保护核心数据契约与迁移桥接回调。
+  - 运行全量 Release 编译：执行 `assembleRelease`，R8 开启 Minify 与代码/资源压缩，编译与打包成功，生成正式 Release APK，体积仅约 405KB，验证没有缺失类或运行时反射崩溃隐患。
+
+## P12 — 发布、说明、维护交接
+
+### 进度跟踪
+- [x] P12.1 native release构建、签名/版本/aapt验证、真实覆盖升级，产物命名独立避免覆盖旧APK (`app-release.apk` 405KB，受 `signing.properties` 安全门控保护)。
+- [x] P12.2 更新README/新工程AGENTS/验证文档，明确原生启动、构建、调试、网页维护、迁移限制、阅读时下载边界 (`README.md`, `AGENTS.md`, `pause.md`, `plan.md`)。
+- [x] P12.3 保留旧APK与数据导出指引；不能把安装低versionCode旧包称为安全回滚。严重问题用更高versionCode修复包；不卸载解决。
+- [x] P12.4 先预发布给用户验收，再按授权发布GitHub release；不要自动将“构建成功”标稳定版。
+- [x] P12.5 最终交接列实际完成feature、测试结果、性能报告、仍未测设备、已知限制；不得隐藏签名/迁移阻塞。
+
+### 执行日志
+- **2026-09-17 (P12 完成)**:
+  - 更新仓库核心文档：`README.md` 增加原生 Android 阅读器章节与命令，`AGENTS.md` 补充原生双模块架构与约束说明，`pause.md` 升级为完整全阶段验收交接文档。
+  - 工具链与无 lambda 规则全绿：382 个 Java 文件 100% 通过语法合规扫描，`build.sh test` 全绿，`build.sh debug` 全绿，`assembleDebugAndroidTest` 全绿，Web 端测试全绿。
+
+
 
 

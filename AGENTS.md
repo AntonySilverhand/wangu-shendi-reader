@@ -23,21 +23,30 @@ node test/check-layout.mjs      # 宽屏形态验证（1100/1500 断点）
 npm test                 # 单元测试（vi test）
 npm run typecheck        # tsc --noEmit，必须零错误
 bash tools/reader-server.sh start|stop|restart|status 8787   # 本地生产预览
-bash android/build.sh 0.0.9    # 打 APK（产物 artifacts/wangu-reader-v0.0.9.apk）
+bash android/build.sh 0.0.9    # 打旧版 APK（产物 artifacts/wangu-reader-v0.0.9.apk）
 gh release create vX.Y.Z artifacts/*.apk ...   # 发布
+
+# 原生 Android 阅读器（Room + Java 17 + RecyclerView）
+bash tools/native/check-no-lambdas.sh       # 语法合规检查：零 lambda/零内部类（必须 0 违规）
+bash tools/native/build.sh test             # 运行原生单元测试 (:core:test, :app:testDebugUnitTest)
+bash tools/native/build.sh debug            # 构建原生调试 APK (android-native/app/build/outputs/apk/debug/)
+./android-native/gradlew -p android-native assembleDebugAndroidTest  # 构建原生 instrumentation 测试 APK
 ```
 
 ## 目录结构
 
 ```
+android-native/    原生 Android 阅读器项目 (Gradle 8.13 + AGP 8.13.2)
+  core/            纯 Java 17 领域模型：书源解析、TXT 切分、排版分块、请求调度器、下载规划器
+  app/             原生 Android 应用：Room 双数据库、Shelf/Reader/Toc/Bookmarks/Settings、旧版迁移桥
 src/shared/    同构：source.ts（书源适配/解析）、api.ts（/api 路由 + 缓存接口）
 src/server/    Node：dev.ts（静态+API）、middleware.ts、file-cache.ts（磁盘缓存）、vite-plugin.ts
 src/worker/    Cloudflare Worker 入口（Cache API）
 src/web/       app.ts（编排）views/（reader/toc/settings/bookmarks/search/home）
                store/（settings/personal/db/toc/chapter/download/txt/remote）
-android/       原生壳：MainActivity + LocalServer（本地资源服务 + 书源代理）+ build.sh
+android/       旧版 WebView 壳与独立打包脚本
 test/          单元测试、真实 HTML fixtures、e2e.mjs、验证脚本
-tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
+tools/         reader-server.sh、verify.sh、run-e2e.sh、native/ (check-no-lambdas, build.sh)
 ```
 
 ## 必须遵守的约束（踩过的坑）

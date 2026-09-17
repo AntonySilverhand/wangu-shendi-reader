@@ -116,15 +116,29 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 
 ---
 
-## Android APK（独立运行，无需后端）
+## 原生 Android 阅读器（Room + Java 17 + RecyclerView）
+
+采用纯原生架构全面升级，替代传统 WebView 混合壳，具备更优响应速度与极简体积（Release APK 仅约 400KB）：
+- **存储物理隔离**：双 Room SQLite 数据库——个人数据（`reader-personal.db`：进度、书签、历史、设置）与正文内容（`reader-content.db`：分块正文、目录、任务、源站冷却）。清理正文缓存不触碰任何个人数据与本地书。
+- **纯 Java 领域层**：`:core` 模块完整移植书源解析、分页合并、回环探针与分块排版算法，194 项黄金契约 100% 对齐。
+- **流式 TXT 导入与导出**：通过 Storage Access Framework 实现无额外权限申请的流式解析与事务入库，支持多本本地书同时管理。
+- **前台阅读专属自动缓存**：结合前台生命周期、屏幕交互、电量与网络状态，阅读时自动规划下载并动态提升近端缺失章节，零后台 Service、零唤醒锁。
+- **旧版数据无损平滑迁移**：启动检测旧版 WebView 存储，通过受限安全桥接分批流式导入，日常使用完全不加载系统 WebView。
+
+```bash
+bash tools/native/check-no-lambdas.sh       # 语法合规检查（零 lambda / 零内部类）
+bash tools/native/build.sh test             # 运行原生单元测试
+bash tools/native/build.sh debug            # 构建原生调试 APK
+./android-native/gradlew -p android-native assembleDebugAndroidTest  # 构建原生测试 APK
+```
+
+## 旧版 Android APK（WebView 壳）
 
 ```bash
 npm run build:android          # 构建 Android 目标 Web 资源（dist-android/）
-bash android/build.sh 0.0.2    # 打包 APK（需要 JDK 21 + Android SDK：aapt/zipalign/apksigner/d8）
-# 产物：artifacts/wangu-reader-v0.0.2.apk
+bash android/build.sh 0.0.9    # 打包旧版 APK
+# 产物：artifacts/wangu-reader-v0.0.9.apk
 ```
-
-APK 内置 Web 应用与一个仅监听 `127.0.0.1` 的本地资源服务器；书源请求由原生层代理获取（绕开浏览器跨域限制），正文解析、缓存、阅读界面与网页版共用同一套代码。已下载章节可离线阅读，无需电脑或服务器。
 
 ## 部署到 Cloudflare（无需自购服务器）
 
