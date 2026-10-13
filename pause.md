@@ -1,5 +1,7 @@
 # Native Android Reader Refactor — Project Pause & Handover Document
 
+> **Continuation update (2026-10-01):** read `docs/native-continuation.md` first. The P6 checklist below is the original handover, not current implementation status. Native navigation, settings, TOC loading, search and native-only JSON SAF workflows have since been wired. P6 is not fully verified; whole-book auto-cache and legacy migration remain unfinished. Preserve the working tree rather than recreating these components.
+
 > **Date**: 2026-09-17  
 > **Status**: Paused at Phase P6 (In Progress)  
 > **Target**: Native Android Reader for 《万古神帝》 (Room + pure Java 17 + Android Views + RecyclerView)

@@ -14,6 +14,7 @@ public class ReaderRepository {
     private final SourceHttpClient httpClient;
     private final Base64Decoder decoder;
     private final AtomicLong currentGeneration = new AtomicLong(1L);
+    private final java.util.concurrent.ConcurrentHashMap<Object, org.wanshu.reader.core.net.CancellationToken> scopes = new java.util.concurrent.ConcurrentHashMap<Object, org.wanshu.reader.core.net.CancellationToken>();
 
     public ReaderRepository(
             ContentRepository contentRepository,
@@ -46,6 +47,9 @@ public class ReaderRepository {
             Object subscriberId,
             DataCallback<ChapterResult> callback
     ) {
+        org.wanshu.reader.core.net.CancellationToken fresh = new org.wanshu.reader.core.net.CancellationToken();
+        org.wanshu.reader.core.net.CancellationToken scope = subscriberId == null ? fresh : scopes.putIfAbsent(subscriberId, fresh);
+        if (scope == null) scope = fresh;
         EnsureCompleteCacheCheckCallback cacheCheck = new EnsureCompleteCacheCheckCallback(
                 bookId,
                 chapterId,
@@ -55,7 +59,8 @@ public class ReaderRepository {
                 contentRepository,
                 scheduler,
                 httpClient,
-                decoder
+                decoder,
+                scope
         );
         contentRepository.getChapter(bookId, chapterId, cacheCheck);
     }
@@ -81,7 +86,13 @@ public class ReaderRepository {
 
     public void cancel(Object subscriberId) {
         if (subscriberId != null) {
-            scheduler.cancelAllForSubscriber(subscriberId);
+            org.wanshu.reader.core.net.CancellationToken scope = scopes.remove(subscriberId);
+            if (scope != null) {
+                synchronized (scope) {
+                    scope.cancel();
+                    scheduler.cancelAllForSubscriber(subscriberId);
+                }
+            } else scheduler.cancelAllForSubscriber(subscriberId);
         }
     }
 }

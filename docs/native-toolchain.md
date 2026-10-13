@@ -1,6 +1,17 @@
 # 原生 Android 构建工具链与环境说明
 
-## 1. 工具链环境记录
+## 当前续作环境（2026-10-04）
+
+以下为本轮实际环境；第 1 节保留原交接环境，不是当前主机：
+
+- 工作目录 `/home/droid/coding/novel`，Linux ARM64。
+- 独立 JDK 17：`$HOME/opt/jdk-17.0.20.1+1`；SDK：`$HOME/android-sdk`，已装 platform 36。全局 Java 未修改。
+- 构建：`JAVA_HOME="$HOME/opt/jdk-17.0.20.1+1" bash tools/native/build.sh check --offline :app:assembleDebugAndroidTest --console=plain`。脚本会验证 Java 17/SDK；不执行 shell `cd`。
+- 本机 SDK 的签名/包信息检查用 `build-tools/34.0.0/apksigner`、`aapt`；另有 `35.0.0-2` 目录。Gradle 可以正常构建，仍有 SDK 重复安装位置警告，不把旧交接的路径/目录名当作事实。
+- 本轮 debug APK：`org.wanshu.reader.native.dev`，code 16/name 0.0.16，min24/target36，APK 签名校验通过；约 3.5 MiB。仅独立调试包，不是原签名覆盖升级证据。
+- `adb devices -l` 无设备；instrumentation APK 仅编译。生产签名配置、旧版数据迁移与设备升级均未验证。
+
+## 1. 原交接工具链环境记录
 
 - **操作系统**: Linux x86_64
 - **全局 Java**: OpenJDK 26.0.2.1（保留系统全局，不修改，避免影响其他系统工具）

@@ -23,6 +23,15 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
     private View.OnClickListener shelfListener;
     private View.OnClickListener nextListener;
 
+    private List<org.wanshu.reader.core.search.ChapterSearchMatch> searchMatches = new ArrayList<org.wanshu.reader.core.search.ChapterSearchMatch>();
+    private int activeMatchIndex = -1;
+
+    public void setSearchMatches(List<org.wanshu.reader.core.search.ChapterSearchMatch> matches, int activeIndex) {
+        this.searchMatches = matches != null ? matches : new ArrayList<org.wanshu.reader.core.search.ChapterSearchMatch>();
+        this.activeMatchIndex = activeIndex;
+        notifyDataSetChanged();
+    }
+
     public void setData(
             String title,
             List<TextBlock> blocks,
@@ -43,9 +52,9 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             int marginDp
     ) {
         this.colors = colors;
-        this.fontSizeSp = fontSizeSp;
-        this.lineSpacingMultiplier = lineSpacingMultiplier;
-        this.marginDp = marginDp;
+        if (fontSizeSp > 0) this.fontSizeSp = fontSizeSp;
+        if (lineSpacingMultiplier > 0) this.lineSpacingMultiplier = lineSpacingMultiplier;
+        if (marginDp >= 0) this.marginDp = marginDp;
         notifyDataSetChanged();
     }
 
@@ -97,7 +106,9 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                         colors,
                         fontSizeSp,
                         lineSpacingMultiplier,
-                        marginDp
+                        marginDp,
+                        searchMatches,
+                        activeMatchIndex
                 );
             }
         } else if (holder instanceof FooterViewHolder) {

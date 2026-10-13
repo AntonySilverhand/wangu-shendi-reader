@@ -18,6 +18,7 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
     private final RequestScheduler scheduler;
     private final SourceHttpClient httpClient;
     private final Base64Decoder decoder;
+    private final org.wanshu.reader.core.net.CancellationToken scope;
 
     public EnsureCompleteCacheCheckCallback(
             String bookId,
@@ -28,7 +29,8 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
             ContentRepository contentRepository,
             RequestScheduler scheduler,
             SourceHttpClient httpClient,
-            Base64Decoder decoder
+            Base64Decoder decoder,
+            org.wanshu.reader.core.net.CancellationToken scope
     ) {
         this.bookId = bookId;
         this.chapterId = chapterId;
@@ -39,10 +41,19 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
         this.scheduler = scheduler;
         this.httpClient = httpClient;
         this.decoder = decoder;
+        this.scope = scope;
     }
 
     @Override
     public void onSuccess(ChapterResult cached) {
+        if (scope.isCancelled()) return;
+        if (!"36780".equals(bookId)) {
+            if (userCallback != null) {
+                if (cached != null) userCallback.onSuccess(cached);
+                else userCallback.onError(new java.io.IOException("本地章节不存在，请重新导入原 TXT；不会联网获取同名章节"));
+            }
+            return;
+        }
         if (cached != null && cached.isComplete()) {
             if (userCallback != null) {
                 userCallback.onSuccess(cached);
@@ -50,19 +61,25 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
             return;
         }
 
-        // Cache missing or incomplete, enqueue network fetch
-        RequestKey key = RequestKey.chapterAll(bookId, chapterId);
-        FetchChapterSchedulerAction action = new FetchChapterSchedulerAction(bookId, chapterId, httpClient, decoder);
-        EnsureCompleteSchedulerCallback callback = new EnsureCompleteSchedulerCallback(contentRepository, userCallback);
-        scheduler.enqueue(key, priority, subscriberId, action, callback);
+        fetchRemote();
     }
 
     @Override
     public void onError(Throwable error) {
-        // Cache read failed, fallback to network
+        if (scope.isCancelled()) return;
+        if (!"36780".equals(bookId)) {
+            if (userCallback != null) userCallback.onError(error);
+            return;
+        }
+        fetchRemote();
+    }
+
+    private void fetchRemote() {
         RequestKey key = RequestKey.chapterAll(bookId, chapterId);
         FetchChapterSchedulerAction action = new FetchChapterSchedulerAction(bookId, chapterId, httpClient, decoder);
         EnsureCompleteSchedulerCallback callback = new EnsureCompleteSchedulerCallback(contentRepository, userCallback);
-        scheduler.enqueue(key, priority, subscriberId, action, callback);
+        synchronized (scope) {
+            if (!scope.isCancelled()) scheduler.enqueue(key, priority, subscriberId, action, callback);
+        }
     }
 }

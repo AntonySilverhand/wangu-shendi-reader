@@ -1,9 +1,10 @@
 package org.wanshu.reader.data.repository;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import org.wanshu.reader.core.model.ChapterResult;
+import org.wanshu.reader.core.text.TextBlock;
+import org.wanshu.reader.core.text.TextBlockBuilder;
 import org.wanshu.reader.data.content.ContentDatabase;
 import org.wanshu.reader.data.content.entity.ChapterBlockEntity;
 import org.wanshu.reader.data.content.entity.ChapterEntity;
@@ -38,15 +39,11 @@ public class GetChapterRunnable implements Runnable {
             }
 
             List<ChapterBlockEntity> blockEntities = db.chapterBlockDao().getBlocks(bookId, chapterId);
-            List<String> paragraphs = new ArrayList<String>();
-
-            for (int i = 0; i < blockEntities.size(); i++) {
-                String content = blockEntities.get(i).content;
-                if (content != null && !content.isEmpty()) {
-                    String[] split = content.split("\n\n");
-                    paragraphs.addAll(Arrays.asList(split));
-                }
+            List<TextBlock> blocks = new ArrayList<TextBlock>();
+            for (ChapterBlockEntity block : blockEntities) {
+                blocks.add(new TextBlock(block.blockIndex, block.startParagraphIndex, block.endParagraphIndex, block.content, null));
             }
+            List<String> paragraphs = TextBlockBuilder.restoreParagraphs(blocks);
 
             ChapterResult result = new ChapterResult(
                     entity.bookId,

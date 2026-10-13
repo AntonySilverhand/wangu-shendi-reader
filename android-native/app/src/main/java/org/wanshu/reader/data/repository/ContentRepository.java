@@ -10,6 +10,10 @@ public class ContentRepository {
     private final ContentDatabase db;
     private final Executor dbExecutor;
     private final TextBlockBuilder textBlockBuilder;
+    private NativeTocLoader tocLoader;
+
+    public void setTocLoader(NativeTocLoader loader) { tocLoader = loader; }
+    public NativeTocLoader getTocLoader() { return tocLoader; }
 
     public ContentRepository(
             ContentDatabase db,
@@ -55,5 +59,9 @@ public class ContentRepository {
 
     public void getTocEntries(String bookId, DataCallback<java.util.List<org.wanshu.reader.data.content.entity.TocEntryEntity>> callback) {
         dbExecutor.execute(new GetTocEntriesRunnable(db, bookId, callback));
+    }
+
+    public void getChapterCacheStatus(String bookId, DataCallback<org.wanshu.reader.data.content.ChapterCacheStatus> callback) {
+        dbExecutor.execute(new GetChapterCacheStatusRunnable(db, bookId, callback));
     }
 }

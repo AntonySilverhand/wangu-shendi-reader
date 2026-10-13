@@ -26,16 +26,23 @@ public class AddBookmarkRunnable implements Runnable {
     @Override
     public void run() {
         try {
-            BookmarkEntity entity = new BookmarkEntity();
-            entity.id = UUID.randomUUID().toString();
-            entity.bookId = anchor.getBookId();
-            entity.chapterId = anchor.getChapterId();
-            entity.paragraphIndex = anchor.getParagraphIndex();
-            entity.offsetUtf16 = anchor.getOffsetUtf16();
-            entity.snippet = snippet;
-            entity.createdAt = System.currentTimeMillis();
-
-            db.bookmarkDao().insertBookmark(entity);
+            BookmarkEntity entity;
+            db.beginTransaction();
+            try {
+                entity = db.bookmarkDao().findNearby(anchor.getBookId(), anchor.getChapterId(), anchor.getParagraphIndex(), anchor.getOffsetUtf16());
+                if (entity == null) {
+                    entity = new BookmarkEntity();
+                    entity.id = UUID.randomUUID().toString();
+                    entity.bookId = anchor.getBookId();
+                    entity.chapterId = anchor.getChapterId();
+                    entity.paragraphIndex = anchor.getParagraphIndex();
+                    entity.offsetUtf16 = anchor.getOffsetUtf16();
+                    entity.snippet = snippet;
+                    entity.createdAt = System.currentTimeMillis();
+                    db.bookmarkDao().insertBookmark(entity);
+                }
+                db.setTransactionSuccessful();
+            } finally { db.endTransaction(); }
 
             if (callback != null) {
                 callback.onSuccess(entity);

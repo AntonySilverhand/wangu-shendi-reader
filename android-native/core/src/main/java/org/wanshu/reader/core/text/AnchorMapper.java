@@ -21,6 +21,21 @@ public class AnchorMapper {
         return 0;
     }
 
+    public static int findBlockIndexForAnchor(List<TextBlock> blocks, int paragraphIndex, int offsetInParagraph) {
+        if (blocks == null || blocks.isEmpty()) return 0;
+        offsetInParagraph = Math.max(0, offsetInParagraph);
+        int fallback = findBlockIndexForParagraph(blocks, paragraphIndex);
+        for (int i = fallback; i < blocks.size(); i++) {
+            TextBlock block = blocks.get(i);
+            if (block.getStartParagraphIndex() > paragraphIndex) break;
+            if (block.getEndParagraphIndex() < paragraphIndex) continue;
+            fallback = i;
+            int offset = block.getParagraphStartOffset(paragraphIndex - block.getStartParagraphIndex()) + offsetInParagraph;
+            if (offset >= 0 && offset < block.getText().length()) return i;
+        }
+        return fallback;
+    }
+
     public static int getOffsetInBlock(TextBlock block, int paragraphIndex, int offsetInParagraph) {
         if (block == null) {
             return 0;

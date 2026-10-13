@@ -64,7 +64,7 @@ public class RequestScheduler {
 
         // 1. Check in-flight
         InFlightTask existingInFlight = inFlight.get(key);
-        if (existingInFlight != null) {
+        if (existingInFlight != null && !existingInFlight.getCancellationToken().isCancelled()) {
             existingInFlight.boostPriority(priority);
             existingInFlight.addSubscription(subscriberId, callback);
             return;
@@ -204,6 +204,9 @@ public class RequestScheduler {
 
         for (int i = 0; i < pendingTasks.size(); i++) {
             ScheduledTask task = pendingTasks.get(i);
+            // A new subscriber must not join a cancelled execution or overwrite its slot.
+            // Wait for its completion event, not a polling timer, before restarting the key.
+            if (inFlight.containsKey(task.getKey())) continue;
             if (task.getPriority().isHighPriority()) {
                 // High priority can always use any free slot
                 candidate = task;

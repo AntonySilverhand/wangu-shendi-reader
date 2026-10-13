@@ -31,15 +31,13 @@ public class ReaderAnchorSampler {
     }
 
     public ReadingAnchor sampleAnchor() {
-        if (bookId.isEmpty() || chapterId.isEmpty()) {
+        if (bookId.isEmpty() || chapterId.isEmpty() || recyclerView.getVisibility() != View.VISIBLE) {
             return null;
         }
 
         int height = recyclerView.getHeight();
         int width = recyclerView.getWidth();
-        if (height <= 0 || width <= 0) {
-            return new ReadingAnchor(bookId, chapterId, 0, 0, System.currentTimeMillis());
-        }
+        if (height <= 0 || width <= 0) return null;
 
         // Anchor line is at ~30% height of the reading area
         int anchorY = (int) (height * 0.30f);
@@ -54,9 +52,7 @@ public class ReaderAnchorSampler {
             }
         }
 
-        if (child == null) {
-            return new ReadingAnchor(bookId, chapterId, 0, 0, System.currentTimeMillis());
-        }
+        if (child == null) return null;
 
         RecyclerView.ViewHolder holder = recyclerView.getChildViewHolder(child);
         long now = System.currentTimeMillis();
@@ -66,12 +62,10 @@ public class ReaderAnchorSampler {
         } else if (holder instanceof BlockViewHolder) {
             BlockViewHolder bvh = (BlockViewHolder) holder;
             TextBlock block = bvh.getCurrentBlock();
-            if (block == null) {
-                return new ReadingAnchor(bookId, chapterId, 0, 0, now);
-            }
+            if (block == null) return null;
 
             TextView tv = bvh.getTextView();
-            int relY = (int) (anchorY - child.getY() - tv.getPaddingTop());
+            int relY = (int) (anchorY - child.getY() - tv.getTop() - tv.getTotalPaddingTop());
             if (relY < 0) {
                 relY = 0;
             }
@@ -82,16 +76,16 @@ public class ReaderAnchorSampler {
                 int charOffsetInBlock = layout.getOffsetForHorizontal(line, 0);
                 return AnchorMapper.mapBlockOffsetToAnchor(bookId, chapterId, block, charOffsetInBlock, now);
             } else {
-                return new ReadingAnchor(bookId, chapterId, block.getStartParagraphIndex(), 0, now);
+                return null;
             }
         } else if (holder instanceof FooterViewHolder) {
             List<TextBlock> blocks = adapter.getBlocks();
             if (!blocks.isEmpty()) {
                 TextBlock last = blocks.get(blocks.size() - 1);
-                return new ReadingAnchor(bookId, chapterId, last.getEndParagraphIndex(), 0, now);
+                return AnchorMapper.mapBlockOffsetToAnchor(bookId, chapterId, last, last.getText().length(), now);
             }
         }
 
-        return new ReadingAnchor(bookId, chapterId, 0, 0, now);
+        return null;
     }
 }

@@ -150,6 +150,31 @@ public class RequestSchedulerTest {
     }
 
     @Test
+    public void cancelledKeyCanBeResubscribedBeforeOldExecutionReturns() {
+        FakeSchedulerClock clock = new FakeSchedulerClock();
+        QueuedTestExecutor executor = new QueuedTestExecutor();
+        RequestScheduler scheduler = new RequestScheduler(clock, executor);
+        RequestKey key = RequestKey.tocPage("36780", 1);
+        TestSchedulerCallback old = new TestSchedulerCallback();
+        TestSchedulerCallback fresh = new TestSchedulerCallback();
+        scheduler.enqueue(key, RequestPriority.LOW, "old-dialog", new TestSchedulerAction("old"), old);
+        scheduler.cancelAllForSubscriber("old-dialog");
+        clock.advanceTime(300);
+        scheduler.enqueue(key, RequestPriority.HIGH, "new-dialog", new TestSchedulerAction("fresh"), fresh);
+        assertTrue(old.isCancelled());
+        assertFalse(fresh.isCancelled());
+        assertEquals(1, scheduler.getInFlightCount());
+        assertEquals(1, scheduler.getPendingCount());
+        executor.runNext();
+        clock.advanceTime(300);
+        executor.runAll();
+        assertEquals("fresh", fresh.getResult());
+        assertFalse(fresh.isCancelled());
+        assertEquals(0, scheduler.getInFlightCount());
+        scheduler.shutdown();
+    }
+
+    @Test
     public void testRateLimitCooldown() {
         FakeSchedulerClock clock = new FakeSchedulerClock();
         QueuedTestExecutor executor = new QueuedTestExecutor();

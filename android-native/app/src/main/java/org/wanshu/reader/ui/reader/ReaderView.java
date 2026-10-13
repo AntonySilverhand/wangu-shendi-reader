@@ -3,12 +3,16 @@ package org.wanshu.reader.ui.reader;
 import android.content.Context;
 import android.graphics.Color;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import org.wanshu.reader.ui.ActionFlowLayout;
+import org.wanshu.reader.ui.Ui;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.List;
@@ -25,12 +29,29 @@ public class ReaderView extends FrameLayout {
     private final LinearLayout headerBar;
     private final TextView headerTitleView;
     private final Button backButton;
+    private final Button searchButton;
+    private final Button bookmarkButton;
+    private final Button tocButton;
+    private final Button settingsButton;
+
+    private final ActionFlowLayout actionsBar;
+    private final LinearLayout searchBar;
+    private float fontSizeSp = 18f;
+    private int maxWidthChars = 36;
+    private int pageMarginDp = 20;
+    private final android.widget.EditText searchEditText;
+    private final TextView searchCountView;
+    private final Button searchPrevButton;
+    private final Button searchNextButton;
+    private final Button searchCloseButton;
 
     private final RecyclerView recyclerView;
     private final LinearLayoutManager layoutManager;
     private final ReaderBlockAdapter adapter;
     private final ReaderAnchorSampler anchorSampler;
     private ReaderScrollListener scrollListener;
+    private ReaderRestoreAnchorRunnable pendingRestore;
+    private View.OnClickListener prevChapterListener, nextChapterListener;
 
     private final LinearLayout loadingLayout;
     private final LinearLayout errorLayout;
@@ -53,22 +74,75 @@ public class ReaderView extends FrameLayout {
         headerBar = new LinearLayout(context);
         headerBar.setOrientation(LinearLayout.HORIZONTAL);
         headerBar.setGravity(Gravity.CENTER_VERTICAL);
-        headerBar.setPadding(16, 16, 16, 16);
+        headerBar.setPadding(Ui.dp(context, 4), 0, Ui.dp(context, 8), 0);
         headerBar.setBackgroundColor(currentThemeColors.barBackground);
 
-        backButton = new Button(context);
-        backButton.setText("书架");
+        backButton = Ui.button(context, "‹ 书架", null);
+        backButton.setContentDescription("返回书架，切换书籍");
         headerBar.addView(backButton);
 
         headerTitleView = new TextView(context);
-        headerTitleView.setTextSize(16f);
+        headerTitleView.setTextSize(15f);
         headerTitleView.setTextColor(currentThemeColors.text);
-        headerTitleView.setPadding(24, 0, 16, 0);
+        headerTitleView.setPadding(12, 0, 8, 0);
         headerTitleView.setSingleLine(true);
+        headerTitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.0f);
         headerBar.addView(headerTitleView, titleParams);
 
         root.addView(headerBar);
+        actionsBar = new ActionFlowLayout(context);
+        actionsBar.setBackgroundColor(currentThemeColors.barBackground);
+        tocButton = Ui.button(context, "目录", null);
+        searchButton = Ui.button(context, "搜索", null);
+        bookmarkButton = Ui.button(context, "书签", null);
+        settingsButton = Ui.button(context, "设置", null);
+        actionsBar.addView(tocButton);
+        actionsBar.addView(searchButton);
+        actionsBar.addView(bookmarkButton);
+        actionsBar.addView(settingsButton);
+        root.addView(actionsBar);
+
+        // 1.1 Search Bar (hidden by default)
+        searchBar = new LinearLayout(context);
+        searchBar.setOrientation(LinearLayout.VERTICAL);
+        searchBar.setGravity(Gravity.CENTER_VERTICAL);
+        searchBar.setPadding(Ui.dp(context, 8), 0, Ui.dp(context, 8), 0);
+        searchBar.setBackgroundColor(currentThemeColors.barBackground);
+        searchBar.setVisibility(View.GONE);
+
+        searchEditText = new android.widget.EditText(context);
+        searchEditText.setHint("搜索本章...");
+        searchEditText.setSingleLine(true);
+        searchEditText.setTextSize(14f);
+        searchEditText.setTextColor(currentThemeColors.text);
+        searchEditText.setHintTextColor(Color.parseColor("#888888"));
+        searchEditText.setMinHeight(Ui.dp(context, 48));
+        LinearLayout.LayoutParams searchEditParams = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        searchBar.addView(searchEditText, searchEditParams);
+
+        searchCountView = new TextView(context);
+        searchCountView.setText("0/0");
+        searchCountView.setTextSize(13f);
+        searchCountView.setTextColor(currentThemeColors.text);
+        searchCountView.setPadding(Ui.dp(context, 4), 0, Ui.dp(context, 4), 0);
+        searchCountView.setMaxWidth(Ui.dp(context, 160));
+        searchCountView.setSingleLine(true);
+        searchCountView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        ActionFlowLayout searchActions = new ActionFlowLayout(context);
+        searchActions.addView(searchCountView);
+        searchPrevButton = Ui.button(context, "↑", null);
+        searchPrevButton.setContentDescription("上一个匹配");
+        searchActions.addView(searchPrevButton);
+        searchNextButton = Ui.button(context, "↓", null);
+        searchNextButton.setContentDescription("下一个匹配");
+        searchActions.addView(searchNextButton);
+        searchCloseButton = Ui.button(context, "×", null);
+        searchCloseButton.setContentDescription("关闭搜索");
+        searchActions.addView(searchCloseButton);
+        searchBar.addView(searchActions);
+
+        root.addView(searchBar);
 
         // Frame to hold loading, error, and content
         FrameLayout bodyFrame = new FrameLayout(context);
@@ -94,7 +168,7 @@ public class ReaderView extends FrameLayout {
         errorLayout = new LinearLayout(context);
         errorLayout.setOrientation(LinearLayout.VERTICAL);
         errorLayout.setGravity(Gravity.CENTER);
-        errorLayout.setPadding(48, 48, 48, 48);
+        errorLayout.setPadding(Ui.dp(context, 16), Ui.dp(context, 8), Ui.dp(context, 16), Ui.dp(context, 8));
         errorLayout.setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         errorLayout.setVisibility(View.GONE);
 
@@ -105,25 +179,27 @@ public class ReaderView extends FrameLayout {
         errorMsgView.setGravity(Gravity.CENTER);
         errorLayout.addView(errorMsgView);
 
-        LinearLayout errorBtnRow = new LinearLayout(context);
-        errorBtnRow.setOrientation(LinearLayout.HORIZONTAL);
-        errorBtnRow.setPadding(0, 32, 0, 0);
+        ActionFlowLayout errorBtnRow = new ActionFlowLayout(context);
+        errorBtnRow.setPadding(0, Ui.dp(context, 8), 0, 0);
 
-        retryButton = new Button(context);
-        retryButton.setText("重试");
+        retryButton = Ui.button(context, "重试", null);
         errorBtnRow.addView(retryButton);
 
-        errorBackButton = new Button(context);
-        errorBackButton.setText("返回书架");
+        errorBackButton = Ui.button(context, "返回书架", null);
         errorBtnRow.addView(errorBackButton);
 
         errorLayout.addView(errorBtnRow);
-        bodyFrame.addView(errorLayout);
+        android.widget.ScrollView errorScroll = new android.widget.ScrollView(context);
+        errorScroll.setFillViewport(true);
+        errorScroll.addView(errorLayout, new android.widget.ScrollView.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        bodyFrame.addView(errorScroll, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         // 4. Content RecyclerView
         recyclerView = new RecyclerView(context);
         layoutManager = new LinearLayoutManager(context);
         recyclerView.setLayoutManager(layoutManager);
+        recyclerView.setItemAnimator(null);
+        recyclerView.setClipToPadding(false);
         recyclerView.setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         recyclerView.setVisibility(View.GONE);
 
@@ -159,7 +235,45 @@ public class ReaderView extends FrameLayout {
             View.OnClickListener shelfListener,
             View.OnClickListener nextListener
     ) {
+        prevChapterListener = prevListener; nextChapterListener = nextListener;
         adapter.setListeners(prevListener, shelfListener, nextListener);
+    }
+
+    /** Called only for keys not already handled by the focused widget. */
+    public boolean handleReaderKey(int keyCode, KeyEvent event) {
+        if (getVisibility() != View.VISIBLE || event.getAction() != KeyEvent.ACTION_DOWN
+                || event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed()) return false;
+        if (isSearchBarVisible()) {
+            if (keyCode != KeyEvent.KEYCODE_ESCAPE || BaseInputConnection.getComposingSpanStart(searchEditText.getText()) >= 0) return false;
+            if (event.getRepeatCount() == 0) searchCloseButton.performClick();
+            return true;
+        }
+        View focus = findFocus();
+        if (focus != null && (focus.onCheckIsTextEditor() || (focus instanceof TextView && ((TextView) focus).hasSelection()))) return false;
+        Button action;
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_T: action = tocButton; break;
+            case KeyEvent.KEYCODE_F: action = searchButton; break;
+            case KeyEvent.KEYCODE_B: action = bookmarkButton; break;
+            case KeyEvent.KEYCODE_S: case KeyEvent.KEYCODE_COMMA: action = settingsButton; break;
+            case KeyEvent.KEYCODE_DPAD_LEFT: case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (event.isShiftPressed()) return false;
+                View.OnClickListener listener = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? prevChapterListener : nextChapterListener;
+                if (listener == null) return false;
+                if (event.getRepeatCount() == 0) listener.onClick(this);
+                return true;
+            case KeyEvent.KEYCODE_MOVE_HOME: case KeyEvent.KEYCODE_MOVE_END:
+                if (event.isShiftPressed() || recyclerView.getVisibility() != View.VISIBLE || adapter.getItemCount() == 0) return false;
+                if (event.getRepeatCount() == 0) {
+                    pendingRestore = null;
+                    recyclerView.stopScroll();
+                    layoutManager.scrollToPositionWithOffset(keyCode == KeyEvent.KEYCODE_MOVE_HOME ? 0 : adapter.getItemCount() - 1, 0);
+                }
+                return true;
+            default: return false;
+        }
+        if (event.getRepeatCount() == 0) action.performClick();
+        return true;
     }
 
     public void setRetryClickListener(View.OnClickListener listener) {
@@ -172,6 +286,11 @@ public class ReaderView extends FrameLayout {
         setBackgroundColor(colors.background);
         headerBar.setBackgroundColor(colors.barBackground);
         headerTitleView.setTextColor(colors.text);
+        searchBar.setBackgroundColor(colors.barBackground);
+        searchEditText.setTextColor(colors.text);
+        searchCountView.setTextColor(colors.text);
+        actionsBar.setBackgroundColor(colors.barBackground);
+        Ui.colors(this, colors);
         adapter.setTypography(colors, -1, -1, -1);
     }
 
@@ -186,17 +305,59 @@ public class ReaderView extends FrameLayout {
             setBackgroundColor(colors.background);
             headerBar.setBackgroundColor(colors.barBackground);
             headerTitleView.setTextColor(colors.text);
+            searchBar.setBackgroundColor(colors.barBackground);
+            searchEditText.setTextColor(colors.text);
+            searchCountView.setTextColor(colors.text);
         }
+        org.wanshu.reader.core.model.ReadingAnchor anchor = anchorSampler.sampleAnchor();
+        this.fontSizeSp = fontSizeSp > 0 ? fontSizeSp : 18f;
+        this.pageMarginDp = Math.max(8, marginDp);
+        actionsBar.setBackgroundColor(currentThemeColors.barBackground);
+        Ui.colors(this, currentThemeColors);
         adapter.setTypography(currentThemeColors, fontSizeSp, lineSpacingMultiplier, marginDp);
+        updateLineWidth(getWidth());
+        if (anchor != null) restoreAnchor(anchor.getParagraphIndex(), anchor.getOffsetUtf16());
     }
 
+    public void setMaxWidthChars(int chars) {
+        maxWidthChars = Math.max(24, Math.min(60, chars));
+        updateLineWidth(getWidth());
+    }
+
+    private void updateLineWidth(int width) {
+        int contentWidth = Math.round(fontSizeSp * getResources().getDisplayMetrics().scaledDensity * maxWidthChars)
+                + Ui.dp(getContext(), pageMarginDp * 2);
+        int gutter = Math.max(0, (width - contentWidth) / 2);
+        recyclerView.setPadding(gutter, 0, gutter, 0);
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        org.wanshu.reader.core.model.ReadingAnchor anchor = anchorSampler == null ? null : anchorSampler.sampleAnchor();
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (recyclerView != null) {
+            updateLineWidth(w);
+            if (anchor != null && !isSearchBarVisible()) restoreAnchor(anchor.getParagraphIndex(), anchor.getOffsetUtf16());
+        }
+    }
+
+    public void cancelAnchorRestore() { pendingRestore = null; }
+
+    public void restoreAnchor(int paragraph, int offset) {
+        pendingRestore = new ReaderRestoreAnchorRunnable(this, paragraph, offset);
+        recyclerView.post(pendingRestore);
+    }
+    boolean isCurrentRestore(ReaderRestoreAnchorRunnable request) { return pendingRestore == request; }
+
     public void showLoading() {
+        pendingRestore = null;
         loadingLayout.setVisibility(View.VISIBLE);
         errorLayout.setVisibility(View.GONE);
         recyclerView.setVisibility(View.GONE);
     }
 
     public void showError(String message) {
+        pendingRestore = null;
         loadingLayout.setVisibility(View.GONE);
         errorLayout.setVisibility(View.VISIBLE);
         recyclerView.setVisibility(View.GONE);
@@ -214,6 +375,7 @@ public class ReaderView extends FrameLayout {
         errorLayout.setVisibility(View.GONE);
         recyclerView.setVisibility(View.VISIBLE);
 
+        pendingRestore = null;
         headerTitleView.setText(title != null ? title : "");
         adapter.setData(title, blocks, hasPrev, hasNext);
 
@@ -224,6 +386,74 @@ public class ReaderView extends FrameLayout {
         } else {
             recyclerView.scrollToPosition(0);
         }
+    }
+
+    public void setSearchListeners(
+            View.OnClickListener toggleListener,
+            View.OnClickListener prevListener,
+            View.OnClickListener nextListener,
+            View.OnClickListener closeListener,
+            android.text.TextWatcher textWatcher
+    ) {
+        searchButton.setOnClickListener(toggleListener);
+        searchPrevButton.setOnClickListener(prevListener);
+        searchNextButton.setOnClickListener(nextListener);
+        searchCloseButton.setOnClickListener(closeListener);
+        if (textWatcher != null) {
+            searchEditText.addTextChangedListener(textWatcher);
+        }
+    }
+
+    public void setTopBarActionListeners(
+            View.OnClickListener tocListener,
+            View.OnClickListener bookmarkListener,
+            View.OnClickListener settingsListener
+    ) {
+        tocButton.setOnClickListener(tocListener);
+        bookmarkButton.setOnClickListener(bookmarkListener);
+        settingsButton.setOnClickListener(settingsListener);
+    }
+
+    public void showSearchBar() {
+        searchBar.setVisibility(View.VISIBLE);
+        actionsBar.setVisibility(View.GONE);
+        searchEditText.requestFocus();
+        android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(searchEditText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    public void hideSearchBar() {
+        searchBar.setVisibility(View.GONE);
+        actionsBar.setVisibility(View.VISIBLE);
+        searchEditText.setText("");
+        searchEditText.clearFocus();
+        android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager)
+                getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(getWindowToken(), 0);
+        }
+    }
+
+    public boolean isSearchBarVisible() {
+        return searchBar.getVisibility() == View.VISIBLE;
+    }
+
+    public void setSearchMatchCount(int current, int total) {
+        searchCountView.setText(current + "/" + total);
+        searchCountView.setContentDescription(total > 0 ? "第" + current + "处，共" + total + "处匹配" : "无匹配");
+        searchPrevButton.setEnabled(total > 0);
+        searchNextButton.setEnabled(total > 0);
+    }
+
+    public android.widget.EditText getSearchEditText() {
+        return searchEditText;
+    }
+
+    public ReaderBlockAdapter getAdapter() {
+        return adapter;
     }
 
     public ReaderAnchorSampler getAnchorSampler() {

@@ -19,11 +19,11 @@ public class TocSearchController {
     private final ScheduledExecutorService executor;
     private final boolean ownsExecutor;
 
-    private long generation = 0L;
+    private volatile long generation = 0L;
     private ScheduledFuture<?> debounceFuture = null;
     private CancellationToken activeToken = null;
     private volatile boolean busy = false;
-    private List<TocSearchResult> results = new ArrayList<TocSearchResult>();
+    private volatile List<TocSearchResult> results = new ArrayList<TocSearchResult>();
     private boolean cancelled = false;
 
     public TocSearchController(TocSearchDeps deps, TocSearchEvents events, ScheduledExecutorService executor) {
@@ -63,7 +63,8 @@ public class TocSearchController {
             return;
         }
 
-        results = deps.searchLoaded(q, TOC_SEARCH_LIMIT);
+        // Input callbacks run on UI. Search only after debounce on the worker.
+        results = new ArrayList<TocSearchResult>();
         events.onUpdate(TocSearchPhase.debouncing(), results);
 
         final long gen = generation;
@@ -118,15 +119,6 @@ public class TocSearchController {
         abortInFlight();
         cancelDebounce();
         startTask(generation, q, true);
-    }
-
-    public synchronized void refreshFromLoadedData(String query) {
-        String q = query != null ? query.trim() : "";
-        if (q.isEmpty() || busy || debounceFuture != null || cancelled) {
-            return;
-        }
-        results = deps.searchLoaded(q, TOC_SEARCH_LIMIT);
-        events.onUpdate(donePhase(), results);
     }
 
     public void shutdown() {
@@ -189,11 +181,14 @@ public class TocSearchController {
         // 1. Search loaded
         List<TocSearchResult> immediate = deps.searchLoaded(query, TOC_SEARCH_LIMIT);
         if (gen != generation || token.isCancelled()) return;
-        this.results = immediate;
+        synchronized (this) {
+            if (gen != generation || token.isCancelled()) return;
+            this.results = immediate;
+        }
 
         boolean isNumeric = isDigitsOnly(query);
         if (!immediate.isEmpty() && (isNumeric || deps.isComplete())) {
-            events.onUpdate(donePhase(), immediate);
+            publish(gen, donePhase(), immediate);
             return;
         }
 
@@ -227,7 +222,7 @@ public class TocSearchController {
             int page = pages.get(i);
             if (gen != generation || token.isCancelled()) return false;
 
-            events.onUpdate(
+            publish(gen,
                     TocSearchPhase.searching("probe", deps.loadedPageCount(), total),
                     new ArrayList<TocSearchResult>()
             );
@@ -238,8 +233,7 @@ public class TocSearchController {
             List<TocSearchResult> res = deps.searchLoaded(query, TOC_SEARCH_LIMIT);
             if (gen != generation) return false;
             if (!res.isEmpty()) {
-                this.results = res;
-                events.onUpdate(donePhase(), res);
+                publish(gen, donePhase(), res);
                 return true;
             }
         }
@@ -257,7 +251,7 @@ public class TocSearchController {
             }
 
             int before = deps.countLoadable();
-            events.onUpdate(
+            publish(gen,
                     TocSearchPhase.searching("full", deps.loadedPageCount(), deps.totalPages()),
                     this.results
             );
@@ -267,20 +261,19 @@ public class TocSearchController {
 
             List<TocSearchResult> res = deps.searchLoaded(query, TOC_SEARCH_LIMIT);
             if (gen != generation) return;
-            this.results = res;
 
             if (!res.isEmpty() && isDigitsOnly(query)) {
-                events.onUpdate(donePhase(), res);
+                publish(gen, donePhase(), res);
                 return;
             }
 
-            events.onUpdate(
+            publish(gen,
                     TocSearchPhase.searching("full", deps.loadedPageCount(), deps.totalPages()),
                     res
             );
 
             if (deps.isComplete()) {
-                events.onUpdate(
+                publish(gen,
                         TocSearchPhase.done(true, false, 0),
                         res
                 );
@@ -297,8 +290,13 @@ public class TocSearchController {
     }
 
     private void finish(long gen, TocSearchPhase state) {
-        if (gen != generation) return;
-        events.onUpdate(state, this.results);
+        publish(gen, state, results);
+    }
+
+    private synchronized void publish(long gen, TocSearchPhase state, List<TocSearchResult> found) {
+        if (gen != generation || cancelled) return;
+        results = found;
+        events.onUpdate(state, found);
     }
 
     private TocSearchPhase donePhase() {

@@ -46,13 +46,24 @@ public class BlockViewHolder extends RecyclerView.ViewHolder {
             float lineSpacingMultiplier,
             int marginDp
     ) {
+        bind(block, colors, fontSizeSp, lineSpacingMultiplier, marginDp, null, -1);
+    }
+
+    public void bind(
+            TextBlock block,
+            ThemeColors colors,
+            float fontSizeSp,
+            float lineSpacingMultiplier,
+            int marginDp,
+            java.util.List<org.wanshu.reader.core.search.ChapterSearchMatch> matches,
+            int activeMatchIndex
+    ) {
         this.currentBlock = block;
         if (block == null) {
             textView.setText("");
             return;
         }
 
-        textView.setText(block.getText());
         textView.setTextSize(fontSizeSp > 0 ? fontSizeSp : 18f);
         textView.setLineSpacing(0f, lineSpacingMultiplier > 0 ? lineSpacingMultiplier : 1.8f);
 
@@ -62,6 +73,41 @@ public class BlockViewHolder extends RecyclerView.ViewHolder {
 
         int padPx = (int) (textView.getContext().getResources().getDisplayMetrics().density * marginDp);
         itemView.setPadding(padPx, 4, padPx, 16);
+
+        String text = block.getText();
+        if (matches == null || matches.isEmpty()) {
+            textView.setText(text);
+            return;
+        }
+
+        int startP = block.getStartParagraphIndex();
+        int endP = block.getEndParagraphIndex();
+        android.text.SpannableString spannable = new android.text.SpannableString(text);
+        boolean hasSpans = false;
+
+        for (int i = 0; i < matches.size(); i++) {
+            org.wanshu.reader.core.search.ChapterSearchMatch m = matches.get(i);
+            int pIdx = m.getParagraphIndex();
+            if (pIdx >= startP && pIdx <= endP) {
+                int relP = pIdx - startP;
+                int pOffset = block.getParagraphStartOffset(relP);
+                int s = Math.max(0, pOffset + m.getStartOffset());
+                int e = Math.min(text.length(), pOffset + m.getEndOffset());
+                if (s < e) {
+                    boolean isActive = (i == activeMatchIndex);
+                    int bgColor = isActive ? android.graphics.Color.parseColor("#FF9800") : android.graphics.Color.parseColor("#FFE082");
+                    spannable.setSpan(new android.text.style.BackgroundColorSpan(bgColor), s, e, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    spannable.setSpan(new android.text.style.ForegroundColorSpan(android.graphics.Color.BLACK), s, e, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    hasSpans = true;
+                }
+            }
+        }
+
+        if (hasSpans) {
+            textView.setText(spannable);
+        } else {
+            textView.setText(text);
+        }
     }
 
     public TextView getTextView() {

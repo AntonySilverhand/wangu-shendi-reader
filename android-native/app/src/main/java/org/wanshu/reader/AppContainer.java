@@ -8,6 +8,7 @@ import org.wanshu.reader.core.text.TextBlockBuilder;
 import org.wanshu.reader.core.util.JavaBase64Decoder;
 import org.wanshu.reader.data.AppExecutors;
 import org.wanshu.reader.data.content.ContentDatabase;
+import org.wanshu.reader.data.export.PersonalDataTransfer;
 import org.wanshu.reader.data.personal.PersonalDatabase;
 import org.wanshu.reader.data.repository.ContentRepository;
 import org.wanshu.reader.data.repository.PersonalRepository;
@@ -21,6 +22,7 @@ public class AppContainer {
     private final PersonalDatabase personalDb;
     private final ContentDatabase contentDb;
     private final PersonalRepository personalRepository;
+    private final PersonalDataTransfer personalDataTransfer;
     private final ContentRepository contentRepository;
     private final RequestScheduler scheduler;
     private final SourceHttpClient httpClient;
@@ -47,10 +49,13 @@ public class AppContainer {
 
         this.textBlockBuilder = new TextBlockBuilder(4000);
         this.personalRepository = new PersonalRepository(this.personalDb, this.executors.getPersonalDbExecutor());
+        this.personalDataTransfer = new PersonalDataTransfer(this.applicationContext, personalDb, executors);
         this.contentRepository = new ContentRepository(this.contentDb, this.executors.getContentDbExecutor(), this.textBlockBuilder);
 
         this.scheduler = new RequestScheduler();
         this.httpClient = new SourceHttpClient();
+        this.contentRepository.setTocLoader(new org.wanshu.reader.data.repository.NativeTocLoader(
+                contentDb, scheduler, httpClient, executors.getContentDbExecutor()));
         this.readerRepository = new ReaderRepository(
                 this.contentRepository,
                 this.scheduler,
@@ -77,6 +82,8 @@ public class AppContainer {
     public ContentDatabase getContentDb() {
         return contentDb;
     }
+
+    public PersonalDataTransfer getPersonalDataTransfer() { return personalDataTransfer; }
 
     public PersonalRepository getPersonalRepository() {
         return personalRepository;

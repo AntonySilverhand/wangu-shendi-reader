@@ -2,6 +2,8 @@
 
 > 严格按 P0 至 P12 顺序推进。每次执行记录修改文件、执行命令、测试结果与阻塞项。
 > 严禁伪造测试结果或在无证据情况下勾选完成。
+>
+> 续作审计（2026-10-01）：历史“完成”记录不等于端到端验收。当前章节仍按整章 assembler 入队，物理页调度/续传持久化尚未接通；P3.4 与后续下载必须补齐。设备测试没有执行，不将 instrumentation 编译成功当作通过。
 
 ## P0 — 固定环境、留基线、建立契约（不做 UI）
 
@@ -131,7 +133,7 @@
 ### 进度跟踪
 - [ ] P6.1 目录RecyclerView、主线+番外、当前项与完整/部分缓存标记、懒加载、加载全目录与失败重试。
 - [x] P6.2 移植目录搜索状态机：260ms防抖、generation、数字probe半径3、每批4页、200展示结果上限与“还有结果”说明；无结果穷尽60秒零请求零自旋 (`TocSearchController`, `TocSearchControllerTest`)。
-- [x] P6.3 本章搜索引擎实现，120ms防抖、忽略大小写、命中总数 (`ChapterSearchEngine`, `ChapterSearchEngineTest`)；UI 连线待完成。
+- [x] P6.3 本章搜索引擎实现，120ms防抖、忽略大小写、命中总数 (`ChapterSearchEngine`, `ChapterSearchEngineTest`)；基础 UI、Enter/Shift+Enter/Esc 已连线，真机与完整功能验收未完成。
 - [ ] P6.4 书签添加取消/列表摘要/删除清空/精确跳转，默认近邻段落去重行为保持合理。
 - [ ] P6.5 缓存统计/空间/清理、个人JSON导入导出、帮助、快捷键与保存错误诊断。
 - [ ] P6.6 本地导入书不走在线加载；缺目录/空目录/失败目录所有输入仍响应。
@@ -144,3 +146,27 @@
   - 在 `ReaderView` 与 `ReaderController` 中添加搜索相关事件监听骨架（`ReaderSearchToggleClickListener`, `ReaderSearchPrevClickListener`, `ReaderSearchNextClickListener`, `ReaderSearchCloseClickListener`）及对应控制方法。
   - 自动化检查：`tools/native/check-no-lambdas.sh` 检查 239 个 Java 文件 100% 符合规范。
   - 单元测试验证：`tools/native/build.sh test` 成功通过。
+
+### 续作记录（2026-09-28 至 2026-10-01，仍为 P6）
+
+- 保留并接好原有未提交的 P6 工作，补齐 `SettingsDialog` 与阅读控制器入口；原生 debug 工程恢复可构建。
+- 常驻“书架”按钮、宽度驱动换行的操作区、居中行宽、可滚动设置/错误区；原生根视图一次性处理系统栏/刘海/IME。Android 36 返回改用 AndroidX dispatcher。
+- 目录实际按物理页走共享低优先级队列，逐页持久化、跳过已加载页，失败可重试，关闭/后台取消。目录搜索目前仅查已保存目录，未假装完成在线渐进搜索。
+- 本章搜索和目录搜索移出 UI；旧查询不能覆盖当前结果。修复 UTF-16 大小写扩展、跨块长段落锚点/高亮及缓存段落重组。沿用现有块索引字段，没有修改已存块格式或 Room schema。
+- 设置直接处理自身按钮；删除 12 个设置 click wrapper、4 个无调用的 reader Runnable、2 个书签 click wrapper。不增加框架或依赖。
+- 原生 JSON SAF 导入导出实际连通：4 MiB 上限、格式/版本/范围/层级验证、事务回滚、合并去重、ID 冲突隔离、保留进度序列号。文件 I/O 与串行个人 DB 队列分开。导入不碰正文、不自动开启下载；完成后返回书架。**仅原生格式 merge；旧网页 v1 和 replace 尚未接入。**
+- 书签添加近邻去重、长段落不同位置保留、精确摘要、确认清空本书；数据变更完成后才刷新列表，已关闭弹窗不再刷新查询。
+- 本轮检查：`JAVA_HOME=$HOME/opt/jdk-17.0.20.1+1 bash tools/native/build.sh check --offline :app:assembleDebugAndroidTest --console=plain` 成功；core 66 + app 10 个 JVM 测试通过，lint 0 error / 21 warning。`check-no-lambdas.sh` 扫描 313 个 Java 文件通过；`git diff --check` 通过。
+- Web `npm run typecheck` 和 66 个单测再次通过。上一检查点已跑源站契约比对（194 项）、delivery、focused 验证；focused 初跑 banner 断言失败，诊断后未改源码/测试的重跑通过，记录其时序敏感性，不抹去初次失败。
+- 新增 `ReaderChromeContractTest`、`TocLoaderPersistenceTest`、`SplitParagraphCacheTest`、`PersonalBackupTest`（8 项）、`BookmarkOperationsTest`（2 项）：仅编译，**未在设备执行**。设备手工步骤见 `docs/native-continuation.md`。
+- 未完成/不发布声明：P6 全功能验收、P7/P8 整本下载、P9 旧版数据迁移、原签名覆盖升级均未完成；`org.wanshu.reader.native.dev` 只是独立调试包，不能据此宣称原地升级数据保留。
+
+### 键盘与搜索续作（2026-10-04）
+
+- 直接复用既有 View/controller 按钮与列表加入 ←/→、T/F/B/S/逗号、Home/End，阅读面板 Esc；焦点控件先处理事件。输入/选字/组词不抢键，Ctrl/Alt/Meta 组合键留给系统，长按不会反复开面板。B 当前打开书签列表，未宣称等同旧版一键切换书签。
+- 修复本章搜索截断：精确计总数，仅保留 500 个位置的窗口，跨窗口仍可上下遍历/循环。复用原 CPU executor 和 task；查询/关闭/暂停取消旧扫描，结果验证 generation，正文更新重新查询，不新增线程/框架/轮询。
+- 先添加测试，API 未实现时两轮编译预期失败（`/tmp/native-keyboard-red.log`、`/tmp/native-search-window-red.log`）；实现后原生 `check --offline :app:assembleDebugAndroidTest` 成功（`/tmp/native-search-window-check.log`）。JVM：core 71 + app 10，失败 0；lint 0 errors / 21 warnings；结构扫描 317 个 Java 文件通过；源解析契约 194/194 通过；typecheck 和 web 66 单测通过。
+- `ChapterSearchPageTest` 5 项已执行：10,003 命中逐项原文偏移、Unicode/跨段、不重叠、空/越界窗口、取消。新增 `ReaderKeyboardTest` 与 `ReaderSearchNavigationTest` 仅编译，无设备执行；`adb devices -l` 为空。
+- 查询/跨窗口/关闭时也撤销旧的已投递锚点修正；最终原生复验成功（`/tmp/native-search-final-check.log`，exit 0）。Debug 签名与 aapt 包信息检查成功（独立 dev 包）。
+- 网页构建及 delivery 全过。focused 初跑 banner 断言失败且刷新等正文超时 120s；独立新上下文诊断恢复第 1 章 92 段、无页面错误；未改源码/测试的 focused 重跑全过。日志 `/tmp/native-search-web-check.log`、`/tmp/native-search-web-diagnostic.log`、`/tmp/native-search-web-rerun.log`；保留初次失败，不宣称已根治其线上/时序敏感性。`src/`、`test/`、旧 `android/` 本轮无源码改动。
+- F11/F12 改为 `in_progress` 并填实现/测试路径；P6 没有勾完成，设备 IME/返回/窗口/触摸验收仍未执行。

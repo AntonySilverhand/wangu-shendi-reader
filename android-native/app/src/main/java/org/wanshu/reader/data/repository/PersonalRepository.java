@@ -40,6 +40,10 @@ public class PersonalRepository {
         dbExecutor.execute(new DeleteBookmarkRunnable(db, id, callback));
     }
 
+    public void clearBookmarks(String bookId, CompletionCallback callback) {
+        dbExecutor.execute(new ClearBookmarksRunnable(db, bookId, callback));
+    }
+
     public void getBookmarks(String bookId, DataCallback<List<BookmarkEntity>> callback) {
         dbExecutor.execute(new GetBookmarksRunnable(db, bookId, callback));
     }

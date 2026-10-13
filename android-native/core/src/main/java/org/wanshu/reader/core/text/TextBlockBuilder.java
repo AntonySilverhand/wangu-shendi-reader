@@ -16,6 +16,28 @@ public class TextBlockBuilder {
         this(DEFAULT_TARGET_BLOCK_SIZE);
     }
 
+    /** Rejoin persisted chunks by logical paragraph index, not by physical block boundaries. */
+    public static List<String> restoreParagraphs(List<TextBlock> blocks) {
+        List<String> paragraphs = new ArrayList<String>();
+        StringBuilder paragraph = new StringBuilder();
+        int currentIndex = -1;
+        for (TextBlock block : blocks) {
+            int count = block.getEndParagraphIndex() - block.getStartParagraphIndex() + 1;
+            String[] parts = block.getText().split("\n\n", count);
+            for (int i = 0; i < parts.length; i++) {
+                int index = block.getStartParagraphIndex() + i;
+                if (index != currentIndex) {
+                    if (currentIndex >= 0) paragraphs.add(paragraph.toString());
+                    paragraph.setLength(0);
+                    currentIndex = index;
+                }
+                paragraph.append(parts[i]);
+            }
+        }
+        if (currentIndex >= 0) paragraphs.add(paragraph.toString());
+        return paragraphs;
+    }
+
     public List<TextBlock> buildBlocks(List<String> paragraphs) {
         List<TextBlock> blocks = new ArrayList<TextBlock>();
         if (paragraphs == null || paragraphs.isEmpty()) {
@@ -59,7 +81,9 @@ public class TextBlockBuilder {
                         end--;
                     }
                     String chunk = p.substring(subOffset, end);
-                    currentOffsets.add(currentText.length());
+                    // The logical paragraph began before this chunk. Keeping that origin
+                    // lets anchors and highlights use paragraph-relative UTF-16 offsets.
+                    currentOffsets.add(-subOffset);
                     currentText.append(chunk);
 
                     blocks.add(new TextBlock(

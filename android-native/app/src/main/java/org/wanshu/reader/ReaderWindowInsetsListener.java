@@ -12,7 +12,8 @@ public class ReaderWindowInsetsListener implements OnApplyWindowInsetsListener {
         Insets systemBars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
         );
-        v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-        return insets;
+        Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+        v.setPadding(systemBars.left, systemBars.top, systemBars.right, Math.max(systemBars.bottom, ime.bottom));
+        return WindowInsetsCompat.CONSUMED;
     }
 }

@@ -17,6 +17,11 @@ public class BackController {
         this.readerAnchorSaver = saver;
     }
 
+    public void releaseOwner(Object owner) {
+        if (dialogDismissHandler == owner) dialogDismissHandler = null;
+        if (readerAnchorSaver == owner) readerAnchorSaver = null;
+    }
+
     public boolean handleBack() {
         if (dialogDismissHandler != null && dialogDismissHandler.dismissActiveDialog()) {
             return true;

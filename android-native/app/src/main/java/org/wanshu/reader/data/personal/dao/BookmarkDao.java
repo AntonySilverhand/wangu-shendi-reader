@@ -16,6 +16,9 @@ public interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE id = :id LIMIT 1")
     BookmarkEntity getBookmark(String id);
 
+    @Query("SELECT * FROM bookmarks WHERE book_id = :bookId AND chapter_id = :chapterId AND paragraph_index = :paragraph AND ABS(offset_utf16 - :offset) <= 80 ORDER BY ABS(offset_utf16 - :offset) ASC LIMIT 1")
+    BookmarkEntity findNearby(String bookId, String chapterId, int paragraph, int offset);
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     void insertBookmark(BookmarkEntity bookmark);
 

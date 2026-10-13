@@ -15,8 +15,8 @@
 | F08 | system/hei/serif/kai；字号14–28、行距1.3–2.4、段距0–1.6、边距8–64、行宽24–60 | `settings.ts` | 即时预览、持久化、恢复默认；缺系统字体明确回退，不下载大字体 | 待实现 | 待编写 | 待验证 | pending |
 | F09 | 段落+字符精确位置；旋转、分屏、改排版后恢复 | `reader.ts` | 同一文本锚点；不能只用 RecyclerView 行号/像素 | 待实现 | 待编写 | 待验证 | pending |
 | F10 | 添加/取消、列表、摘要、时间、跳转、单删/清空书签 | `bookmarks-view.ts` | 同章不同位置可跳转；成功提示必须在事务提交后 | 待实现 | 待编写 | 待验证 | pending |
-| F11 | 本章搜索、总命中数、上/下一个、高亮、关闭恢复 | `search-view.ts` | 搜索不会改变正文/偏移；大量命中仍可遍历；输入法不遮挡 | 待实现 | 待编写 | 待验证 | pending |
-| F12 | 触摸滚动/正文点击唤栏、滚动自动收栏、鼠标、键盘快捷键 | `reader.ts`, `app.ts` | 保留 ←/→、T/F/B/S/逗号、Esc、Home/End；编辑时不抢键；文字可选择复制 | 待实现 | 待编写 | 待验证 | pending |
+| F11 | 本章搜索、总命中数、上/下一个、高亮、关闭恢复 | `search-view.ts` | 搜索不会改变正文/偏移；大量命中仍可遍历；输入法不遮挡 | `ChapterSearchEngine/Page`, `ReaderController/View/SearchTask`, `BlockViewHolder` | JVM `ChapterSearchPageTest` 5 项已过；`ReaderSearchNavigationTest` 仅编译 | >10k 命中跨窗口/循环；快改查询/关闭；IME 与长段锚点（未执行） | in_progress |
+| F12 | 触摸滚动/正文点击唤栏、滚动自动收栏、鼠标、键盘快捷键 | `reader.ts`, `app.ts` | 保留 ←/→、T/F/B/S/逗号、Esc、Home/End；编辑时不抢键；文字可选择复制 | `MainActivity.onKeyDown`, `ReaderView.handleReaderKey`, `ReaderController`；B 为书签列表，自动收栏尚未完成 | `ReaderKeyboardTest` 仅编译；无键盘设备执行证据 | 外接键盘全部入口、组合键/输入/选字不抢键、弹窗 Esc；鼠标/自动收栏（未执行） | in_progress |
 | F13 | 手机/横屏/平板/折叠/大窗口布局，目录栏与进度栏 | `layout.ts`, CSS | 按窗口 dp 宽度响应，不按设备型号；内容限制行宽；点击目标≥48dp | 待实现 | 待编写 | 待验证 | pending |
 | F14 | edge-to-edge、四边 cutout、IME、可选沉浸、可选阅读常亮 | `native-display.ts`, Java display 类 | 沉浸默认关，编辑/弹层暂退出；常亮只在前台阅读生效 | 待实现 | 待编写 | 待验证 | pending |
 | F15 | 手动范围下载、当前起50/100/300章、全部、进度、失败列表、取消/重试 | `download.ts`, `settings-view.ts` | 持久化、可暂停恢复；“全部”包含主线与番外，不只当前已载目录 | 待实现 | 待编写 | 待验证 | pending |

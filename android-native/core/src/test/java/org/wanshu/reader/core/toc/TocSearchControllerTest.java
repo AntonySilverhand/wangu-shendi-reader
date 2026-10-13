@@ -137,6 +137,38 @@ public class TocSearchControllerTest {
     }
 
     @Test
+    public void clearingQueryRejectsAnAlreadyRunningSearch() throws Exception {
+        checkLateSearch(false);
+    }
+
+    @Test
+    public void closingSearchRejectsAnAlreadyRunningSearch() throws Exception {
+        checkLateSearch(true);
+    }
+
+    private void checkLateSearch(boolean cancel) throws Exception {
+        controller.shutdown();
+        store.loaded.put(1, store.entriesOf(1));
+        BlockingTocSearchDeps blocking = new BlockingTocSearchDeps(store);
+        java.util.concurrent.ScheduledExecutorService executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        controller = new TocSearchController(blocking, events, executor);
+        try {
+            controller.setQuery("3");
+            assertTrue(blocking.started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            if (cancel) controller.cancel(); else controller.setQuery("");
+            blocking.release.countDown();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(controller.getCurrentResults().isEmpty());
+            assertTrue(events.getLastUpdate().results.isEmpty());
+            assertEquals(cancel ? TocSearchPhaseKind.CANCELLED : TocSearchPhaseKind.IDLE, events.getLastUpdate().phase.getKind());
+            assertTrue(store.loadLog.isEmpty());
+        } finally {
+            blocking.release.countDown(); controller.shutdown(); executor.shutdownNow();
+        }
+    }
+
+    @Test
     public void testResumeAfterRetry() throws Exception {
         store.failed.add(2);
 
