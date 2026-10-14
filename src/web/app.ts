@@ -19,7 +19,7 @@ import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
-import { BOOK, type TocEntry } from '../shared/source.ts';
+import { DEFAULT_BOOK as BOOK, type TocEntry } from '../shared/source.ts';
 import { excerpt } from './format.ts';
 import { LayoutController } from './layout.ts';
 
