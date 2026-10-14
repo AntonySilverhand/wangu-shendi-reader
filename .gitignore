@@ -12,3 +12,6 @@ android/debug.keystore
 android-native/.gradle/
 android-native/build/
 android-native/**/build/
+
+# 编码代理的临时 git worktree
+.claude/worktrees/
