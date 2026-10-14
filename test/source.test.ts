@@ -488,6 +488,22 @@ describe('标题归一化', () => {
     expect(extra.id).toBe('59040612');
     expect(merged.filter((e) => e.extra)).toHaveLength(1);
   });
+  it('源站编号回退时按上传顺序排列，不交错两段剧情；结尾重传丢弃', () => {
+    const items: TocItemRaw[] = [
+      { id: '38623378', title: '第三千三百八十九章 又惹祸了' },
+      { id: '38623308', title: '第3389章 再破极限' },
+      { id: '38623375', title: '第3409章 天魔霸枪' },
+      { id: '38623380', title: '第三千三百九十章 大师兄' },
+      { id: '58210378', title: '第三千三百九十章 大师兄' },
+    ];
+    const titles = mergeTocPages([items]).map((e) => e.title);
+    expect(titles).toEqual([
+      '第3389章 再破极限',
+      '第3409章 天魔霸枪',
+      '第三千三百八十九章 又惹祸了',
+      '第三千三百九十章 大师兄',
+    ]);
+  });
   it('同一章号优先保留有标题的版本', () => {
     const items: TocItemRaw[] = [
       { id: '49080154', title: '分节阅读第4208节' },

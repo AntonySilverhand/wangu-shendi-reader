@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 
 public class SourceUrls {
     public static final String BOOK_ID = "36780";
+    /** 分节阅读第1节; local TXT books number their chapters from "1" instead. */
+    public static final String FIRST_CHAPTER_ID = "8924760";
     public static final String BOOK_ORIGIN = "https://wanshuge.org";
     public static final int MAX_CHAPTER_PAGES = 40;
     public static final int TOC_PAGE_FALLBACK = 44;

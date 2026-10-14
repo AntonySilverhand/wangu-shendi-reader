@@ -44,16 +44,6 @@ public class BlockViewHolder extends RecyclerView.ViewHolder {
             ThemeColors colors,
             float fontSizeSp,
             float lineSpacingMultiplier,
-            int marginDp
-    ) {
-        bind(block, colors, fontSizeSp, lineSpacingMultiplier, marginDp, null, -1);
-    }
-
-    public void bind(
-            TextBlock block,
-            ThemeColors colors,
-            float fontSizeSp,
-            float lineSpacingMultiplier,
             int marginDp,
             java.util.List<org.wanshu.reader.core.search.ChapterSearchMatch> matches,
             int activeMatchIndex

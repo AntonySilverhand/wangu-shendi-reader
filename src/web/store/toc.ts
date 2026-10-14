@@ -15,7 +15,6 @@ import { mergeTocEntries } from '../../shared/source.ts';
 import type { TocRangeResult } from '../../shared/source.ts';
 import { getToc, putToc } from './db.ts';
 import { apiGet } from './remote.ts';
-import { bump, syncTocCounters } from '../instrument.ts';
 import { isAbortError } from './toc-search.ts';
 
 export const TOC_CHUNK_PAGES = 4;
@@ -66,13 +65,6 @@ export class TocStore {
   }
 
   private emit(): void {
-    syncTocCounters({
-      failedPages: [...this.failedPages].sort((a, b) => a - b),
-      loadedPages: this.pageEntries.size,
-      totalPages: this.totalPages,
-      loadingPages: this.loadingPages.size,
-      nextMissingPage: this.nextLoadablePage(),
-    });
     for (const fn of this.listeners) fn();
   }
 
@@ -180,7 +172,6 @@ export class TocStore {
     to: number,
     opts: { background?: boolean; signal?: AbortSignal | null } = {},
   ): Promise<void> {
-    bump('tocLoadRangeCalls');
     const start = Math.max(1, from);
     const end = Math.min(this.totalPages, to);
     if (start > end) return;
@@ -190,10 +181,7 @@ export class TocStore {
     }
     if (missing.length === 0) return;
     if (this.offline) {
-      for (const p of missing) {
-        this.failedPages.add(p);
-        bump('tocPagesFailed');
-      }
+      for (const p of missing) this.failedPages.add(p);
       this.emit();
       return;
     }
@@ -214,7 +202,6 @@ export class TocStore {
         }
         const chunkFrom = chunk[0]!;
         const chunkTo = chunk[chunk.length - 1]!;
-        bump('tocLoadRangeChunks');
         for (const p of chunk) this.loadingPages.add(p);
         this.emit();
         try {
@@ -227,12 +214,8 @@ export class TocStore {
           for (const page of result.pages) {
             this.pageEntries.set(page.page, page.entries);
             this.failedPages.delete(page.page);
-            bump('tocPagesLoaded');
           }
-          for (const p of chunk.filter((p) => !this.pageEntries.has(p))) {
-            this.failedPages.add(p);
-            bump('tocPagesFailed');
-          }
+          for (const p of chunk.filter((p) => !this.pageEntries.has(p))) this.failedPages.add(p);
           this.rebuild();
           this.schedulePersist();
         } catch (err) {
@@ -240,10 +223,7 @@ export class TocStore {
             // 取消：不记失败，直接上抛
             throw err;
           }
-          for (const p of chunk) {
-            this.failedPages.add(p);
-            bump('tocPagesFailed');
-          }
+          for (const p of chunk) this.failedPages.add(p);
         } finally {
           for (const p of chunk) this.loadingPages.delete(p);
           this.emit();

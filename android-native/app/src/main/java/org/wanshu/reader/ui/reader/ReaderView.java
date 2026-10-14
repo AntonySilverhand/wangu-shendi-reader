@@ -16,7 +16,6 @@ import org.wanshu.reader.ui.Ui;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.List;
-import org.wanshu.reader.core.text.AnchorMapper;
 import org.wanshu.reader.core.text.TextBlock;
 import org.wanshu.reader.ui.reader.adapter.ReaderBlockAdapter;
 import org.wanshu.reader.ui.reader.anchor.AnchorSampleCallback;
@@ -280,20 +279,6 @@ public class ReaderView extends FrameLayout {
         retryButton.setOnClickListener(listener);
     }
 
-    public void applyTheme(ThemeColors colors) {
-        if (colors == null) return;
-        this.currentThemeColors = colors;
-        setBackgroundColor(colors.background);
-        headerBar.setBackgroundColor(colors.barBackground);
-        headerTitleView.setTextColor(colors.text);
-        searchBar.setBackgroundColor(colors.barBackground);
-        searchEditText.setTextColor(colors.text);
-        searchCountView.setTextColor(colors.text);
-        actionsBar.setBackgroundColor(colors.barBackground);
-        Ui.colors(this, colors);
-        adapter.setTypography(colors, -1, -1, -1);
-    }
-
     public void setTypography(
             ThemeColors colors,
             float fontSizeSp,
@@ -345,7 +330,9 @@ public class ReaderView extends FrameLayout {
 
     public void restoreAnchor(int paragraph, int offset) {
         pendingRestore = new ReaderRestoreAnchorRunnable(this, paragraph, offset);
-        recyclerView.post(pendingRestore);
+        // Jump before the next frame so the chapter top never flashes; defer only during layout.
+        if (recyclerView.isInLayout() || !isAttachedToWindow()) recyclerView.post(pendingRestore);
+        else pendingRestore.run();
     }
     boolean isCurrentRestore(ReaderRestoreAnchorRunnable request) { return pendingRestore == request; }
 
@@ -364,13 +351,7 @@ public class ReaderView extends FrameLayout {
         errorMsgView.setText(message != null ? "加载失败: " + message : "加载失败");
     }
 
-    public void showContent(
-            String title,
-            List<TextBlock> blocks,
-            boolean hasPrev,
-            boolean hasNext,
-            int targetParagraphIndex
-    ) {
+    public void showContent(String title, List<TextBlock> blocks, boolean hasPrev, boolean hasNext) {
         loadingLayout.setVisibility(View.GONE);
         errorLayout.setVisibility(View.GONE);
         recyclerView.setVisibility(View.VISIBLE);
@@ -378,14 +359,7 @@ public class ReaderView extends FrameLayout {
         pendingRestore = null;
         headerTitleView.setText(title != null ? title : "");
         adapter.setData(title, blocks, hasPrev, hasNext);
-
-        if (targetParagraphIndex > 0 && blocks != null && !blocks.isEmpty()) {
-            int blockIdx = AnchorMapper.findBlockIndexForParagraph(blocks, targetParagraphIndex);
-            int targetPos = blockIdx + 1; // +1 for header
-            recyclerView.post(new ReaderScrollToPositionRunnable(recyclerView, targetPos, 0));
-        } else {
-            recyclerView.scrollToPosition(0);
-        }
+        recyclerView.scrollToPosition(0);
     }
 
     public void setSearchListeners(

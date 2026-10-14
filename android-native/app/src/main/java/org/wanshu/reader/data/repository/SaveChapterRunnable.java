@@ -38,16 +38,13 @@ public class SaveChapterRunnable implements Runnable {
             final String bookId = result.getBookId();
             final String chapterId = result.getChapterId();
 
-            // 1. Check existing chapter in DB: do not overwrite with shorter/incomplete content
+            // 1. Never store an empty result or overwrite longer cached text with a shorter one.
             ChapterEntity existing = db.chapterDao().getChapter(bookId, chapterId);
-            if (existing != null) {
-                // If existing content has more characters or paragraphs, do not overwrite with shorter
-                if (existing.charCount > result.getCharCount() && result.getCharCount() > 0) {
-                    if (callback != null) {
-                        callback.onSuccess();
-                    }
-                    return;
+            if (result.getCharCount() <= 0 || (existing != null && existing.charCount > result.getCharCount())) {
+                if (callback != null) {
+                    callback.onSuccess();
                 }
+                return;
             }
 
             // 2. Prepare blocks

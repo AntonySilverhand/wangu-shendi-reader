@@ -12,7 +12,6 @@
  *  - 触摸/键鼠只通过 pointer/hover media query 做交互优化，不参与模式判定；
  *  - 监听 resize（rAF 合帧）+ matchMedia 双保险，不重复注册多个事件。
  */
-import { bump } from './instrument.ts';
 
 export type LayoutMode = 'compact' | 'medium' | 'wide';
 
@@ -93,7 +92,6 @@ export class LayoutController {
     if (next === this.mode) return;
     const prev = this.mode;
     this.mode = next;
-    bump('layoutModeChanges');
     this.apply();
     this.opts.onModeChange(next, prev);
   }

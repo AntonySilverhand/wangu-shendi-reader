@@ -12,9 +12,3 @@ dependencies {
     testImplementation(libs.junit)
 }
 
-tasks.register<JavaExec>("dumpContracts") {
-    classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("org.wanshu.reader.core.source.SourceContractDumper")
-    args = listOf(rootProject.file("../contracts/native/source-contracts-native.json").absolutePath)
-}
-

@@ -30,6 +30,7 @@ public class ChapterAssembler {
 
         boolean probePending = false;
         boolean terminal = false;
+        Throwable firstError = null;
 
         while (fetched.size() < SourceUrls.MAX_CHAPTER_PAGES) {
             if (queue.isEmpty()) {
@@ -119,6 +120,7 @@ public class ChapterAssembler {
                 absent.add(pageIndex);
             } else {
                 failed.add(pageIndex);
+                if (firstError == null) firstError = outcome.getError();
             }
         }
 
@@ -136,6 +138,10 @@ public class ChapterAssembler {
         Collections.sort(sortedMissing);
 
         if (fetched.isEmpty()) {
+            // Same as source.ts: a network failure is an error, not an empty "incomplete" chapter.
+            if (firstError != null) {
+                throw new IllegalStateException(firstError.getMessage() != null ? firstError.getMessage() : "正文获取失败", firstError);
+            }
             return new ChapterResult(
                     bookId,
                     chapterId,

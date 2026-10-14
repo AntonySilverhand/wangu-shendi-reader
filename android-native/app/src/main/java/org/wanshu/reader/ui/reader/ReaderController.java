@@ -52,7 +52,8 @@ public class ReaderController implements ReaderAnchorSaver, DialogDismissHandler
     private volatile long currentGeneration;
     private String currentPrevChapterId, currentNextChapterId;
     private int targetParagraph = -1, targetOffset;
-    private boolean hasShownContent;
+    private boolean hasShownContent, completeShown;
+    private int shownCharCount;
     private ReadingAnchor currentAnchor, beforeSearch;
     private List<String> currentParagraphs = new ArrayList<String>();
     private List<ChapterSearchMatch> currentMatches = new ArrayList<ChapterSearchMatch>();
@@ -90,7 +91,7 @@ public class ReaderController implements ReaderAnchorSaver, DialogDismissHandler
         currentBookId = route.getBookId(); currentChapterId = route.getChapterId();
         currentGeneration = route.getGeneration(); targetParagraph = route.getTargetParagraph(); targetOffset = route.getTargetOffset();
         currentPrevChapterId = null; currentNextChapterId = null;
-        hasShownContent = false; progressReady = false; currentAnchor = null;
+        hasShownContent = false; completeShown = false; shownCharCount = 0; progressReady = false; currentAnchor = null;
         closeSearch(); currentParagraphs = new ArrayList<String>();
         view.setChapterIdentity(currentBookId, currentChapterId);
         view.showLoading();
@@ -134,7 +135,8 @@ public class ReaderController implements ReaderAnchorSaver, DialogDismissHandler
     public void setResumed(boolean value) {
         boolean returning = value && !resumed;
         resumed = value; updateAwake();
-        if (returning && progressReady && !currentChapterId.isEmpty() && isCurrent(currentGeneration)) beginObservation(currentGeneration, null);
+        // A complete chapter on screen needs no reload; otherwise resume the cancelled completion.
+        if (returning && progressReady && !completeShown && !currentChapterId.isEmpty() && isCurrent(currentGeneration)) beginObservation(currentGeneration, null);
     }
     public void dispose() {
         deactivate(); disposed = true;
@@ -152,11 +154,18 @@ public class ReaderController implements ReaderAnchorSaver, DialogDismissHandler
     }
     public void applyChapter(ChapterResult result, List<TextBlock> blocks, long generation, boolean complete) {
         if (!isCurrent(generation)) return;
+        if (result.getParagraphs().isEmpty()) {
+            if (complete && !hasShownContent) view.showError("源站未返回正文");
+            return;
+        }
+        // 宁多勿少: keep what is shown unless the new text is longer or newly complete.
+        if (hasShownContent && (result.getCharCount() < shownCharCount
+                || (result.getCharCount() == shownCharCount && (completeShown || !result.isComplete())))) return;
         ReadingAnchor anchor = hasShownContent ? view.getAnchorSampler().sampleAnchor() : null;
         currentPrevChapterId = result.getPrevChapterId(); currentNextChapterId = result.getNextChapterId();
         currentParagraphs = new ArrayList<String>(result.getParagraphs());
-        hasShownContent = true;
-        view.showContent(result.getTitle(), blocks, currentPrevChapterId != null, currentNextChapterId != null, 0);
+        hasShownContent = true; completeShown = result.isComplete(); shownCharCount = result.getCharCount();
+        view.showContent(result.getTitle(), blocks, currentPrevChapterId != null, currentNextChapterId != null);
         if (anchor != null) view.restoreAnchor(anchor.getParagraphIndex(), anchor.getOffsetUtf16());
         else if (targetParagraph >= 0) view.restoreAnchor(targetParagraph, Math.max(0, targetOffset));
         if (view.isSearchBarVisible()) onSearchQueryChanged(view.getSearchEditText().getText().toString());

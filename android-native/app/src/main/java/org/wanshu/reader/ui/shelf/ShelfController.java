@@ -6,7 +6,7 @@ import android.net.Uri;
 import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import org.wanshu.reader.core.source.SourceUrls;
 import org.wanshu.reader.core.model.ReadingAnchor;
 import org.wanshu.reader.core.text.TextBlockBuilder;
 import org.wanshu.reader.data.AppExecutors;
@@ -75,7 +75,6 @@ public class ShelfController implements DialogDismissHandler {
         }
         this.pendingItems = items;
 
-        final AtomicInteger remaining = new AtomicInteger(items.size());
         for (int i = 0; i < items.size(); i++) {
             final ShelfItemModel item = items.get(i);
             personalRepository.getReadingProgress(item.getBook().bookId, new ShelfAnchorLoadedCallback(this, item.getBook().bookId));
@@ -107,12 +106,12 @@ public class ShelfController implements DialogDismissHandler {
         if (anchor != null && anchor.getChapterId() != null && !anchor.getChapterId().isEmpty()) {
             navigator.openReaderWithAnchor(bookId, anchor.getChapterId(), anchor.getParagraphIndex(), anchor.getOffsetUtf16());
         } else {
-            navigator.openReader(bookId, "1");
+            onStartClicked(bookId);
         }
     }
 
     public void onStartClicked(String bookId) {
-        navigator.openReader(bookId, "1");
+        navigator.openReader(bookId, SourceUrls.BOOK_ID.equals(bookId) ? SourceUrls.FIRST_CHAPTER_ID : "1");
     }
 
     public void onDeleteClicked(String bookId, String bookTitle) {
@@ -146,7 +145,11 @@ public class ShelfController implements DialogDismissHandler {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
         intent.setType("text/*");
-        activity.startActivityForResult(intent, REQUEST_CODE_IMPORT_TXT);
+        try {
+            activity.startActivityForResult(intent, REQUEST_CODE_IMPORT_TXT);
+        } catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(activity, "没有可用的文件选择器", Toast.LENGTH_LONG).show();
+        }
     }
 
     public void handleImportUri(Uri uri, String bookTitle) {

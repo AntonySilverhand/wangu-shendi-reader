@@ -15,7 +15,6 @@ import {
   type TocSearchPhase,
   type TocSearchResult,
 } from '../store/toc-search.ts';
-import { bump, setSearchState } from '../instrument.ts';
 
 const ROW_HEIGHT = 52;
 const OVERSCAN = 10;
@@ -63,22 +62,8 @@ export class TocView {
       },
       {
         update: (state, results) => {
-          const wasIdle =
-            this.searchPhase.kind === 'idle' || this.searchPhase.kind === 'debouncing';
-          if (state.kind === 'searching' && wasIdle) bump('loadAllForSearchCount');
           this.searchPhase = state;
           this.searchResults = results;
-          setSearchState(
-            state.kind === 'searching'
-              ? 'running'
-              : state.kind === 'done'
-                ? results.length > 0
-                  ? 'found'
-                  : 'exhausted'
-                : state.kind === 'cancelled'
-                  ? 'cancelled'
-                  : 'idle',
-          );
           if (this.query) this.renderSearchView();
           this.updateFooter();
         },
@@ -95,7 +80,6 @@ export class TocView {
     }) as HTMLInputElement;
     this.searchInput.addEventListener('input', () => {
       this.query = this.searchInput.value.trim();
-      bump('searchGeneration');
       this.search.setQuery(this.query);
       // 立即重绘（旧结果 + 新状态），网络任务由控制器 debounce 后统一发起
       this.renderList(true);
@@ -396,7 +380,6 @@ export class TocView {
 
   /** 渲染搜索结果/状态。只渲染，绝不发起加载。 */
   private renderSearchView(): void {
-    bump('renderSearchCount');
     const store = this.opts.store;
     const results = this.searchResults;
     const phase = this.searchPhase;
@@ -484,7 +467,6 @@ export class TocView {
   searchInToc(query: string): void {
     this.searchInput.value = query;
     this.query = query.trim();
-    bump('searchGeneration');
     if (this.query) {
       this.search.searchNow(this.query);
       this.renderSearchView();

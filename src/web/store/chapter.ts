@@ -4,6 +4,7 @@ import { getChapter, openDb, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
+const refreshing = new Set<string>();
 export const CHAPTER_CACHE_VERSION = 4;
 
 /** 版本变更时清掉旧缓存记录：旧版本可能存着“去重后缺段”的内容，绝不能继续复用 */
@@ -42,7 +43,8 @@ function notifyUpdate(record: ChapterRecord): void {
 
 async function refreshInBackground(bookId: string, chapterId: string, stale: ChapterRecord): Promise<void> {
   const key = `${bookId}:${chapterId}`;
-  if (inFlight.has(key)) return;
+  if (inFlight.has(key) || refreshing.has(key)) return;
+  refreshing.add(key);
   try {
     const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
       retries: 0,
@@ -58,6 +60,8 @@ async function refreshInBackground(bookId: string, chapterId: string, stale: Cha
     }
   } catch {
     /* 源站不可用：保留已缓存内容 */
+  } finally {
+    refreshing.delete(key);
   }
 }
 

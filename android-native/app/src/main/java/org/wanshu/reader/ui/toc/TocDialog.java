@@ -4,6 +4,10 @@ import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -19,8 +23,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
-import org.wanshu.reader.core.toc.TocSearchController;
-import org.wanshu.reader.core.toc.TocSearchResult;
 import org.wanshu.reader.data.AppExecutors;
 import org.wanshu.reader.data.content.ChapterCacheStatus;
 import org.wanshu.reader.data.content.entity.TocEntryEntity;
@@ -29,7 +31,7 @@ import org.wanshu.reader.navigation.AppNavigator;
 import org.wanshu.reader.navigation.DialogDismissHandler;
 import org.wanshu.reader.ui.theme.ThemeColors;
 
-public class TocDialog extends Dialog implements DialogDismissHandler, TocItemClickListener {
+public class TocDialog extends Dialog implements DialogDismissHandler, TocItemClickListener, View.OnClickListener, TextWatcher, Runnable {
     private final String bookId;
     private final String currentChapterId;
     private final ContentRepository contentRepository;
@@ -39,7 +41,6 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
 
     private TextView titleView;
     private TextView loadStatusView;
-    private int loadedPages, totalPages = 44;
     private boolean loading;
     private long loadGeneration;
     private boolean positioned;
@@ -56,7 +57,9 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
 
     private List<TocEntryEntity> rawEntries = new ArrayList<TocEntryEntity>();
     private ChapterCacheStatus cacheStatus = null;
-    private TocSearchController searchController = null;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private String query = "";
+    private long searchGeneration;
 
     public TocDialog(
             Context context,
@@ -106,7 +109,7 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
         headerBar.addView(titleView, titleParams);
 
         closeButton = Ui.button(ctx, "关闭", null);
-        closeButton.setOnClickListener(new TocCloseClickListener(this));
+        closeButton.setOnClickListener(this);
         headerBar.addView(closeButton);
 
         root.addView(headerBar);
@@ -124,7 +127,7 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
         searchEditText.setTextSize(14f);
         searchEditText.setTextColor(textColor);
         searchEditText.setHintTextColor(Color.parseColor("#888888"));
-        searchEditText.addTextChangedListener(new TocSearchTextWatcher(this));
+        searchEditText.addTextChangedListener(this);
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
         searchRow.addView(searchEditText, searchParams);
 
@@ -135,19 +138,19 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
         filterRow.setPadding(Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8), 0);
 
         filterAllBtn = Ui.button(ctx, "全部", null);
-        filterAllBtn.setOnClickListener(new TocFilterClickListener(this, TocFilterType.ALL));
+        filterAllBtn.setOnClickListener(this);
         filterRow.addView(filterAllBtn);
 
         filterMainBtn = Ui.button(ctx, "正文", null);
-        filterMainBtn.setOnClickListener(new TocFilterClickListener(this, TocFilterType.MAIN));
+        filterMainBtn.setOnClickListener(this);
         filterRow.addView(filterMainBtn);
 
         filterExtraBtn = Ui.button(ctx, "番外", null);
-        filterExtraBtn.setOnClickListener(new TocFilterClickListener(this, TocFilterType.EXTRA));
+        filterExtraBtn.setOnClickListener(this);
         filterRow.addView(filterExtraBtn);
 
         loadAllBtn = Ui.button(ctx, "加载全目录", null);
-        loadAllBtn.setOnClickListener(new TocLoadAllClickListener(this));
+        loadAllBtn.setOnClickListener(this);
         if (bookId.startsWith("local-")) {
             loadAllBtn.setVisibility(View.GONE);
         }
@@ -225,24 +228,31 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
     @Override
     public void dismiss() {
         pauseLoading();
-        if (searchController != null) { searchController.shutdown(); searchController = null; }
+        handler.removeCallbacks(this); searchGeneration++;
         super.dismiss();
     }
 
     public void pauseLoading() {
+        boolean wasLoading = loading;
         loading = false; loadGeneration++;
         if (contentRepository.getTocLoader() != null) contentRepository.getTocLoader().cancel(this);
-        if (searchController != null) searchController.cancel();
-        if (loadAllBtn != null) { loadAllBtn.setEnabled(true); loadAllBtn.setText("继续加载目录"); }
+        if (wasLoading && loadAllBtn != null) { loadAllBtn.setEnabled(true); loadAllBtn.setText("继续加载目录"); }
+    }
+
+    @Override
+    public void onClick(View v) {
+        if (v == closeButton) dismiss();
+        else if (v == loadAllBtn) onLoadAllClicked();
+        else if (adapter != null) adapter.setFilter(v == filterMainBtn ? TocFilterType.MAIN : v == filterExtraBtn ? TocFilterType.EXTRA : TocFilterType.ALL);
     }
 
     public void applyLoadProgress(int loaded, int total, boolean finished, String error, long generation) {
         if (!isShowing() || !loading || generation != loadGeneration) return;
-        loadedPages = loaded; totalPages = total;
         loadStatusView.setText(error == null ? "目录 " + loaded + "/" + total + " 页" : "目录加载暂停：" + error);
         loadAllBtn.setText(finished ? (error == null ? "目录已载入" : "重试未载入目录") : "加载 " + loaded + "/" + total);
         loadAllBtn.setEnabled(finished && error != null);
-        loadData();
+        // Reloading the whole list per page is wasteful; refresh every few pages and at the end.
+        if (finished || loaded % 4 == 1) loadData();
         if (finished) loading = false;
     }
 
@@ -254,9 +264,6 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
 
     public void onTocEntriesLoaded(final List<TocEntryEntity> entries) {
         this.rawEntries = entries != null ? entries : new ArrayList<TocEntryEntity>();
-        java.util.List<org.wanshu.reader.data.content.entity.TocPageEntity> pages = contentRepository.getDatabase().tocDao().getAllTocPages(bookId);
-        loadedPages = contentRepository.getDatabase().tocDao().getLoadedPagesCount(bookId);
-        totalPages = pages.isEmpty() ? (bookId.startsWith("local-") ? 1 : 44) : pages.get(pages.size() - 1).pageIndex;
         contentRepository.getChapterCacheStatus(bookId, new TocCacheStatusLoadedCallback(this));
     }
 
@@ -319,11 +326,7 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
         filterMainBtn.setText("正文 (" + adapter.getMainCount() + ")");
         filterExtraBtn.setText("番外 (" + adapter.getExtraCount() + ")");
 
-        // Init Search Controller
-        if (searchController != null) searchController.shutdown();
-        RoomTocSearchDeps deps = new RoomTocSearchDeps(bookId, rawEntries, totalPages, loadedPages);
-        searchController = new TocSearchController(deps, new TocSearchLoadedEvents(this));
-        if (searchEditText.length() > 0) searchController.searchNow(searchEditText.getText().toString());
+        if (!query.isEmpty()) { searchGeneration++; run(); }
 
         // Position once; arriving TOC pages must not keep pulling the user back.
         if (!positioned) {
@@ -333,36 +336,36 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
         }
     }
 
-    public void onFilterClicked(TocFilterType filter) {
-        if (adapter != null) {
-            adapter.setFilter(filter);
-        }
-    }
+    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+    @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
 
-    public void onSearchQueryChanged(String query) {
-        String q = query != null ? query.trim() : "";
-        if (searchController != null) {
-            searchController.setQuery(q);
-        } else if (q.isEmpty() && adapter != null) {
-            adapter.clearSearchResults();
-        }
-    }
-
-    public void onSearchResultsUpdated() {
-        executors.getMainThreadExecutor().execute(new TocSearchResultsRunnable(this));
-    }
-
-    public void applySearchResults() {
-        if (!isShowing() || searchController == null) return;
-        // Read current state on UI, not an obsolete result captured by a queued callback.
-        List<TocSearchResult> results = searchController.getCurrentResults();
-        if (searchEditText.length() == 0) {
+    @Override
+    public void afterTextChanged(Editable s) {
+        query = s.toString().trim();
+        searchGeneration++;
+        handler.removeCallbacks(this);
+        if (query.isEmpty()) {
             titleView.setText("目录");
             adapter.clearSearchResults();
         } else {
-            titleView.setText(results.size() >= TocSearchController.TOC_SEARCH_LIMIT ? "目录 · 前200项" : "目录 · " + results.size() + "项");
-            adapter.setSearchResults(results);
+            handler.postDelayed(this, 250);
         }
+    }
+
+    /** Debounced search over the saved TOC; stale results are dropped by generation. */
+    @Override
+    public void run() {
+        if (isShowing() && !query.isEmpty()) executors.getCpuExecutor().execute(new TocFilterTask(this, rawEntries, query, searchGeneration));
+    }
+
+    public void postToUi(Runnable task) {
+        executors.getMainThreadExecutor().execute(task);
+    }
+
+    public void applySearchResults(List<Integer> matches, long generation) {
+        if (!isShowing() || generation != searchGeneration) return;
+        titleView.setText(matches.size() >= TocFilterTask.LIMIT ? "目录 · 前200项" : "目录 · " + matches.size() + "项");
+        adapter.setSearchResults(matches);
     }
 
     public void onLoadAllClicked() {

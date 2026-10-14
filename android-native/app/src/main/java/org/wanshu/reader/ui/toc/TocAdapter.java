@@ -4,7 +4,6 @@ import android.view.ViewGroup;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
-import org.wanshu.reader.core.toc.TocSearchResult;
 import org.wanshu.reader.ui.theme.ThemeColors;
 
 public class TocAdapter extends RecyclerView.Adapter<TocViewHolder> {
@@ -34,36 +33,13 @@ public class TocAdapter extends RecyclerView.Adapter<TocViewHolder> {
         applyFilter();
     }
 
-    public void setSearchResults(List<TocSearchResult> results) {
+    /** Indices refer to the list passed to setData (same order as the saved TOC). */
+    public void setSearchResults(List<Integer> matches) {
         this.isSearchActive = true;
         this.displayedItems.clear();
-        if (results != null) {
-            for (int i = 0; i < results.size(); i++) {
-                TocSearchResult res = results.get(i);
-                if (res != null && res.getEntry() != null) {
-                    // Match against allItems to preserve cache status and isCurrent
-                    String cId = res.getEntry().getChapterId();
-                    TocItemModel matched = null;
-                    for (int j = 0; j < allItems.size(); j++) {
-                        if (allItems.get(j).getChapterId().equals(cId)) {
-                            matched = allItems.get(j);
-                            break;
-                        }
-                    }
-                    if (matched != null) {
-                        displayedItems.add(matched);
-                    } else {
-                        displayedItems.add(new TocItemModel(
-                                res.getEntry().getChapterId(),
-                                res.getEntry().getTitle(),
-                                res.getEntry().isExtra(),
-                                res.getEntry().getOrderKey(),
-                                false,
-                                TocCacheStatus.UNCACHED
-                        ));
-                    }
-                }
-            }
+        for (int i = 0; i < matches.size(); i++) {
+            int index = matches.get(i);
+            if (index >= 0 && index < allItems.size()) displayedItems.add(allItems.get(index));
         }
         notifyDataSetChanged();
     }

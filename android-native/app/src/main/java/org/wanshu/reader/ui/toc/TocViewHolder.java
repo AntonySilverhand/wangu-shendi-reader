@@ -4,20 +4,24 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.recyclerview.widget.RecyclerView;
 import org.wanshu.reader.ui.theme.ThemeColors;
 
-public class TocViewHolder extends RecyclerView.ViewHolder {
+public class TocViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener {
     private final TextView titleView;
     private final TextView badgeView;
+    private TocItemModel item;
+    private TocItemClickListener listener;
 
     public TocViewHolder(LinearLayout itemView, TextView titleView, TextView badgeView) {
         super(itemView);
         this.titleView = titleView;
         this.badgeView = badgeView;
+        itemView.setOnClickListener(this);
     }
 
     public static TocViewHolder create(ViewGroup parent) {
@@ -69,6 +73,12 @@ public class TocViewHolder extends RecyclerView.ViewHolder {
             badgeView.setText("");
         }
 
-        itemView.setOnClickListener(new TocItemViewClickListener(listener, item));
+        this.item = item;
+        this.listener = listener;
+    }
+
+    @Override
+    public void onClick(View v) {
+        if (listener != null && item != null) listener.onTocItemClicked(item);
     }
 }

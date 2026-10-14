@@ -29,8 +29,7 @@ case "$CMD" in
   lint) tasks=(:app:lintDebug) ;;
   debug) tasks=(:core:test :app:testDebugUnitTest :app:assembleDebug) ;;
   release) tasks=(:core:test :app:assembleRelease :app:lintRelease) ;;
-  dump-contracts) tasks=(:core:dumpContracts) ;;
   check) tasks=(:core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug) ;;
-  *) echo "Usage: $0 [debug|release|test|lint|check|dump-contracts] [Gradle flags]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [debug|release|test|lint|check] [Gradle flags]" >&2; exit 1 ;;
 esac
 exec bash "$NATIVE_DIR/gradlew" -p "$NATIVE_DIR" "${extra[@]}" "${tasks[@]}" "$@"

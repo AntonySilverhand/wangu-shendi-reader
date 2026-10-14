@@ -3,11 +3,10 @@ package org.wanshu.reader.ui.reader.anchor;
 import androidx.recyclerview.widget.RecyclerView;
 import org.wanshu.reader.core.model.ReadingAnchor;
 
+/** Samples the reading anchor only after scrolling stops; no per-frame layout reads. */
 public class ReaderScrollListener extends RecyclerView.OnScrollListener {
     private final ReaderAnchorSampler sampler;
     private final AnchorSampleCallback callback;
-    private long lastSaveTime = 0L;
-    private ReadingAnchor candidateAnchor = null;
 
     public ReaderScrollListener(ReaderAnchorSampler sampler, AnchorSampleCallback callback) {
         this.sampler = sampler;
@@ -15,34 +14,9 @@ public class ReaderScrollListener extends RecyclerView.OnScrollListener {
     }
 
     @Override
-    public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-        if (dy == 0) {
-            return;
-        }
-
-        candidateAnchor = sampler.sampleAnchor();
-        long now = System.currentTimeMillis();
-        // Continuous scroll throttle: at most once per 1000ms
-        if (now - lastSaveTime >= 1000L && candidateAnchor != null) {
-            lastSaveTime = now;
-            if (callback != null) {
-                callback.onAnchorSampled(candidateAnchor);
-            }
-        }
-    }
-
-    @Override
     public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-        if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-            candidateAnchor = sampler.sampleAnchor();
-            lastSaveTime = System.currentTimeMillis();
-            if (candidateAnchor != null && callback != null) {
-                callback.onAnchorSampled(candidateAnchor);
-            }
-        }
-    }
-
-    public ReadingAnchor getCandidateAnchor() {
-        return candidateAnchor;
+        if (newState != RecyclerView.SCROLL_STATE_IDLE || callback == null) return;
+        ReadingAnchor anchor = sampler.sampleAnchor();
+        if (anchor != null) callback.onAnchorSampled(anchor);
     }
 }

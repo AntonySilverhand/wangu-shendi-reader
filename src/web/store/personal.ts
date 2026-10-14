@@ -4,7 +4,6 @@
  * 清理正文缓存不会触碰这里的数据。
  */
 import type { Settings } from './settings.ts';
-import { bump } from '../instrument.ts';
 
 export interface ReadingPosition {
   chapterId: string;
@@ -158,12 +157,10 @@ export class PersonalStore {
       localStorage.setItem(PERSONAL_KEY, JSON.stringify(this.data));
       this.persistFailed = false;
       this.lastPersistError = null;
-      bump('personalSaves');
       return true;
     } catch (err) {
       this.persistFailed = true;
       this.lastPersistError = err instanceof Error ? err.message : String(err);
-      bump('personalSaveFails');
       console.error('[personal] localStorage 写入失败，个人数据未落盘：', this.lastPersistError);
       return false;
     }

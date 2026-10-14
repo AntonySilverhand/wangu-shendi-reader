@@ -533,56 +533,51 @@ export function classifyTocItems(items: TocItemRaw[], page = 1): ClassifiedToc {
   return { main, extras };
 }
 
+/** 重传判定：同标题条目的 id 相差超过此值视为源站后期重新上传（正文批次内 id 连续，跨度约 1.4 万） */
+const REUPLOAD_ID_GAP = 1_000_000;
+
 /**
- * 合并多页目录（含去重、排序、番外归位）：
- *  - 正文按章节号排序，同一章优先保留“有标题”的版本
- *  - 同一章号的不同标题保留（源站少量错号章节）
- *  - 无章号的收尾内容（完本感言/彩蛋章）排在正文后面
+ * 合并多页目录（去重、排序、番外归位）：
+ *  - 正文按上传顺序（id 递增）排列，与源站“下一章”链接一致。源站章节号多处回退/错号
+ *    （例如第3409章之后从“第三千三百八十九章”重新编号），按章节号排序会把两段剧情交错。
+ *  - 同号同标题只留最早的一份；同号的“分节阅读第N节”占位让位给有标题的版本（保持占位的位置）。
+ *  - 结尾的整批重传（同标题、id 远大于原版、占位标题）丢弃。
  *  - 番外按番外序号排序，附在最后
  */
 export function mergeTocEntries(pages: TocEntry[][]): TocEntry[] {
-  const groups = new Map<number, { entries: TocEntry[]; order: number }>();
-  const noNumber: TocEntry[] = [];
-  const noNumberSeen = new Set<string>();
-  const seenIds = new Set<string>();
-  let order = 0;
-
+  const unique = new Map<string, TocEntry>();
   for (const page of pages) {
-    for (const entry of page) {
-      if (entry.extra) continue;
-      if (seenIds.has(entry.id)) continue;
-      seenIds.add(entry.id);
-      if (entry.number === null || entry.number <= 0) {
-        if (!noNumberSeen.has(entry.displayTitle)) {
-          noNumberSeen.add(entry.displayTitle);
-          noNumber.push(entry);
-        }
-        continue;
-      }
-      let group = groups.get(entry.number);
-      if (!group) {
-        group = { entries: [], order: order++ };
-        groups.set(entry.number, group);
-      }
-      group.entries.push(entry);
-    }
+    for (const entry of page) if (!entry.extra && !unique.has(entry.id)) unique.set(entry.id, entry);
   }
+  const ordered = [...unique.values()].sort((a, b) => a.id.length - b.id.length || (a.id < b.id ? -1 : 1));
 
   const main: TocEntry[] = [];
-  const sortedNumbers = [...groups.keys()].sort((a, b) => a - b);
-  for (const number of sortedNumbers) {
-    const group = groups.get(number)!;
-    const titled = group.entries.filter((e) => restTitle(e) !== '');
-    const pool = titled.length > 0 ? titled : group.entries;
-    const seenRest = new Set<string>();
-    for (const entry of pool) {
-      const rest = restTitle(entry);
-      if (seenRest.has(rest)) continue;
-      seenRest.add(rest);
-      main.push(entry);
+  const byNumber = new Map<number, number[]>(); // 章节号 → main 下标
+  const firstIdByTitle = new Map<string, number>();
+  let maxTitledNumber = 0;
+  for (const entry of ordered) {
+    const number = entry.number ?? 0;
+    const rest = restTitle(entry);
+    const same = byNumber.get(number) ?? [];
+    if (rest === '') {
+      // 占位标题：已有同号章节，或更大章号早已发布（结尾重传批次）
+      if (same.length > 0 || maxTitledNumber > number) continue;
+    } else {
+      const firstId = firstIdByTitle.get(rest);
+      if (same.some((i) => restTitle(main[i]!) === rest)) continue;
+      if (firstId !== undefined && Number(entry.id) - firstId > REUPLOAD_ID_GAP) continue;
+      if (firstId === undefined) firstIdByTitle.set(rest, Number(entry.id));
+      maxTitledNumber = Math.max(maxTitledNumber, number);
+      const placeholder = same.find((i) => restTitle(main[i]!) === '');
+      if (placeholder !== undefined) {
+        main[placeholder] = entry;
+        continue;
+      }
     }
+    same.push(main.length);
+    byNumber.set(number, same);
+    main.push(entry);
   }
-  main.push(...noNumber);
 
   // 番外：同标题保留 id 最大（最新）的一份，按番外序号排序
   const extrasByTitle = new Map<string, TocEntry>();
@@ -865,15 +860,6 @@ export function enqueueUpstream<T>(task: () => Promise<T>, high = true): Promise
     });
     pumpUpstream();
   });
-}
-
-/** 仪表：当前排队/活跃上游任务数（测试取证用，同构无副作用） */
-export function upstreamQueueSize(): number {
-  return upstreamJobs.length;
-}
-
-export function upstreamActiveCount(): number {
-  return upstreamActive;
 }
 
 export interface FetchTextResult {

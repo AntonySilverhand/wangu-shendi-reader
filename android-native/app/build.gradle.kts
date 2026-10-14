@@ -19,8 +19,6 @@ android {
         versionCode = 16
         versionName = "0.0.16"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
         javaCompileOptions {
             annotationProcessorOptions {
                 arguments["room.schemaLocation"] = "$projectDir/schemas"
@@ -83,16 +81,11 @@ dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.recyclerview)
+    // Pins activity's transitive lifecycle version; no code uses it directly.
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.lifecycle.livedata)
     implementation(libs.room.runtime)
     annotationProcessor(libs.room.compiler)
 
     testImplementation(libs.junit)
-    testImplementation(libs.room.testing)
-
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.ext.junit)
-    androidTestImplementation(libs.androidx.test.espresso)
-    androidTestImplementation(libs.room.testing)
 }

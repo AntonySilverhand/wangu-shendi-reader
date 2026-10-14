@@ -4,13 +4,10 @@ import java.math.BigInteger;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import org.wanshu.reader.core.model.TocEntry;
 
 public class TocMerger {
@@ -26,64 +23,63 @@ public class TocMerger {
         return stripped;
     }
 
-    public static List<TocEntry> mergeTocPages(List<List<TocEntry>> pages) {
-        Map<Integer, List<TocEntry>> groups = new HashMap<Integer, List<TocEntry>>();
-        List<Integer> groupOrder = new ArrayList<Integer>();
-        List<TocEntry> noNumber = new ArrayList<TocEntry>();
-        Set<String> noNumberSeen = new HashSet<String>();
-        Set<String> seenIds = new HashSet<String>();
+    /** Same-title entries whose ids differ by more than this are late re-uploads (the main batch spans ~14k ids). */
+    private static final long REUPLOAD_ID_GAP = 1000000L;
 
+    /**
+     * Main chapters follow upload order (ascending id), matching the source's own "next chapter" links.
+     * The source renumbers backwards in places (e.g. after 第3409章 comes 第三千三百八十九章), so sorting by
+     * chapter number would interleave two stretches of the story. Same number + same title keeps the earliest;
+     * a "分节阅读第N节" placeholder yields to a titled version in place; late batch re-uploads are dropped.
+     */
+    public static List<TocEntry> mergeTocPages(List<List<TocEntry>> pages) {
+        Map<String, TocEntry> unique = new HashMap<String, TocEntry>();
         for (int p = 0; p < pages.size(); p++) {
             List<TocEntry> page = pages.get(p);
             for (int i = 0; i < page.size(); i++) {
                 TocEntry entry = page.get(i);
-                if (entry.isExtra()) continue;
-                if (seenIds.contains(entry.getChapterId())) continue;
-                seenIds.add(entry.getChapterId());
-
-                TitleInfo info = TitleNormalizer.normalizeTitle(entry.getTitle());
-                Integer num = info.getNumber();
-
-                if (num == null || num <= 0) {
-                    if (!noNumberSeen.contains(info.getDisplayTitle())) {
-                        noNumberSeen.add(info.getDisplayTitle());
-                        noNumber.add(entry);
-                    }
-                    continue;
-                }
-
-                if (!groups.containsKey(num)) {
-                    groups.put(num, new ArrayList<TocEntry>());
-                    groupOrder.add(num);
-                }
-                groups.get(num).add(entry);
+                if (!entry.isExtra() && !unique.containsKey(entry.getChapterId())) unique.put(entry.getChapterId(), entry);
             }
         }
+        List<TocEntry> ordered = new ArrayList<TocEntry>(unique.values());
+        Collections.sort(ordered, new TocIdComparator());
 
         List<TocEntry> main = new ArrayList<TocEntry>();
-        Collections.sort(groupOrder);
-
-        for (int i = 0; i < groupOrder.size(); i++) {
-            int num = groupOrder.get(i);
-            List<TocEntry> groupEntries = groups.get(num);
-            List<TocEntry> titled = new ArrayList<TocEntry>();
-            for (int j = 0; j < groupEntries.size(); j++) {
-                if (!restTitle(groupEntries.get(j)).isEmpty()) {
-                    titled.add(groupEntries.get(j));
+        Map<Integer, List<Integer>> byNumber = new HashMap<Integer, List<Integer>>();
+        Map<String, Long> firstIdByTitle = new HashMap<String, Long>();
+        int maxTitledNumber = 0;
+        for (int k = 0; k < ordered.size(); k++) {
+            TocEntry entry = ordered.get(k);
+            Integer parsed = TitleNormalizer.normalizeTitle(entry.getTitle()).getNumber();
+            int number = parsed == null || parsed < 0 ? 0 : parsed;
+            String rest = restTitle(entry);
+            List<Integer> same = byNumber.get(number);
+            if (same == null) same = new ArrayList<Integer>();
+            if (rest.isEmpty()) {
+                if (!same.isEmpty() || maxTitledNumber > number) continue;
+            } else {
+                boolean duplicate = false;
+                Integer placeholder = null;
+                for (int j = 0; j < same.size(); j++) {
+                    String other = restTitle(main.get(same.get(j)));
+                    if (other.equals(rest)) duplicate = true;
+                    if (other.isEmpty() && placeholder == null) placeholder = same.get(j);
+                }
+                if (duplicate) continue;
+                long id = Long.parseLong(entry.getChapterId());
+                Long firstId = firstIdByTitle.get(rest);
+                if (firstId != null && id - firstId > REUPLOAD_ID_GAP) continue;
+                if (firstId == null) firstIdByTitle.put(rest, id);
+                maxTitledNumber = Math.max(maxTitledNumber, number);
+                if (placeholder != null) {
+                    main.set(placeholder, entry);
+                    continue;
                 }
             }
-            List<TocEntry> pool = !titled.isEmpty() ? titled : groupEntries;
-            Set<String> seenRest = new HashSet<String>();
-            for (int j = 0; j < pool.size(); j++) {
-                TocEntry entry = pool.get(j);
-                String rest = restTitle(entry);
-                if (seenRest.contains(rest)) continue;
-                seenRest.add(rest);
-                main.add(entry);
-            }
+            same.add(main.size());
+            byNumber.put(number, same);
+            main.add(entry);
         }
-
-        main.addAll(noNumber);
 
         // Extras
         Map<String, TocEntry> extrasByTitle = new HashMap<String, TocEntry>();

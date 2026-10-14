@@ -17,11 +17,10 @@ import { PersonalStore, type Bookmark, type ReadingPosition } from './store/pers
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
-import { listChapterIds, clearBookContent, storageStats } from './store/db.ts';
+import { listChapterIds, clearBookContent } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { BOOK, type TocEntry } from '../shared/source.ts';
 import { excerpt } from './format.ts';
-import { bump } from './instrument.ts';
 import { LayoutController } from './layout.ts';
 
 const REMOTE_BOOK_ID = BOOK.id;
@@ -46,7 +45,6 @@ export class App {
   private chapterController: AbortController | null = null;
   private currentEntry: TocEntry | null = null;
   private view: View = 'home';
-  private cachedIds = new Set<string>();
   private prefetchTimer: ReturnType<typeof setTimeout> | null = null;
   private prefetchController: AbortController | null = null;
   private wakeLock: { release: () => Promise<void> } | null = null;
@@ -539,7 +537,6 @@ export class App {
     chapterId: string,
     opts: { restorePosition?: boolean; push?: boolean; force?: boolean; anchor?: { paragraph: number; offset: number } } = {},
   ): Promise<void> {
-    bump('chapterOpens');
     const sameRendered = chapterId === this.renderedChapterId;
     const alreadyLoading = chapterId === this.loadingChapterId;
     if (opts.push !== false && location.hash !== `#/read/${chapterId}`) {
@@ -587,13 +584,11 @@ export class App {
     try {
       const record = await loadChapterRecord(this.bookId, chapterId, { force: opts.force, signal: controller.signal });
       if (this.disposed || generation !== this.chapterGeneration || this.currentChapterId !== chapterId) {
-        bump('chapterStaleAborts');
         return;
       }
       this.renderLoadedChapter(chapterId, record, restore);
     } catch (err) {
       if (this.disposed || generation !== this.chapterGeneration || this.currentChapterId !== chapterId) {
-        bump('chapterStaleAborts');
         return;
       }
       const message = offline
@@ -808,7 +803,6 @@ export class App {
   private async refreshCachedIdsNow(): Promise<void> {
     try {
       const ids = await listChapterIds(this.bookId);
-      this.cachedIds = ids;
       this.tocView.setCachedIds(ids);
     } catch {
       /* 忽略 */
@@ -986,20 +980,5 @@ export class App {
     if (this.bookId === bookId) await this.switchBook(REMOTE_BOOK_ID);
     else this.renderHomeView();
     showToast('已移除');
-  }
-
-  /** 供调试/测试：统计当前状态 */
-  async debugStats(): Promise<Record<string, unknown>> {
-    const storage = await storageStats(this.bookId);
-    return {
-      bookId: this.bookId,
-      view: this.view,
-      chapterId: this.currentChapterId,
-      tocLoaded: this.toc.mainCount,
-      tocComplete: this.toc.isComplete,
-      cached: this.cachedIds.size,
-      storage,
-      settings: this.settings.get(),
-    };
   }
 }
