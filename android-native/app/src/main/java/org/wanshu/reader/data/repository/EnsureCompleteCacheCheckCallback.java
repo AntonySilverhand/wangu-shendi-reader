@@ -1,5 +1,6 @@
 package org.wanshu.reader.data.repository;
 
+import org.wanshu.reader.core.model.BookKey;
 import org.wanshu.reader.core.model.ChapterResult;
 import org.wanshu.reader.core.net.SourceHttpClient;
 import org.wanshu.reader.core.queue.RequestKey;
@@ -47,7 +48,7 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
     @Override
     public void onSuccess(ChapterResult cached) {
         if (scope.isCancelled()) return;
-        if (!"36780".equals(bookId)) {
+        if (!BookKey.isOnlineId(bookId)) {
             if (userCallback != null) {
                 if (cached != null) userCallback.onSuccess(cached);
                 else userCallback.onError(new java.io.IOException("本地章节不存在，请重新导入原 TXT；不会联网获取同名章节"));
@@ -67,7 +68,7 @@ public class EnsureCompleteCacheCheckCallback implements DataCallback<ChapterRes
     @Override
     public void onError(Throwable error) {
         if (scope.isCancelled()) return;
-        if (!"36780".equals(bookId)) {
+        if (!BookKey.isOnlineId(bookId)) {
             if (userCallback != null) userCallback.onError(error);
             return;
         }

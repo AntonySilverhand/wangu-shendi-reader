@@ -57,6 +57,16 @@ public class ContentRepository {
         dbExecutor.execute(new EnsureOnlineBookRunnable(db, bookId, title, author, callback));
     }
 
+    /** Adds the default book once (see SeedDefaultBookRunnable); a removed default book stays removed. */
+    public void seedDefaultBook(android.content.SharedPreferences prefs, CompletionCallback callback) {
+        dbExecutor.execute(new SeedDefaultBookRunnable(db, prefs, callback));
+    }
+
+    /** Title of a chapter from the saved TOC or cached chapter; empty when neither is known. */
+    public void getChapterTitle(String bookId, String chapterId, DataCallback<String> callback) {
+        dbExecutor.execute(new GetChapterTitleRunnable(db, bookId, chapterId, callback));
+    }
+
     public void getTocEntries(String bookId, DataCallback<java.util.List<org.wanshu.reader.data.content.entity.TocEntryEntity>> callback) {
         dbExecutor.execute(new GetTocEntriesRunnable(db, bookId, callback));
     }

@@ -77,6 +77,7 @@ public class SaveChapterRunnable implements Runnable {
             entity.bytes = totalBytes;
             entity.prevChapterId = result.getPrevChapterId();
             entity.nextChapterId = result.getNextChapterId();
+            entity.missingPagesJson = RestrictedMarker.encode(result.isRestricted());
             entity.revision = System.currentTimeMillis();
             entity.fetchedAt = System.currentTimeMillis();
 

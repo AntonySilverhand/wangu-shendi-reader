@@ -56,7 +56,8 @@ public class GetChapterRunnable implements Runnable {
                     entity.charCount,
                     entity.isComplete,
                     new ArrayList<Integer>(),
-                    entity.sourceSemanticsVersion
+                    entity.sourceSemanticsVersion,
+                    RestrictedMarker.isRestricted(entity.missingPagesJson)
             );
 
             if (callback != null) {
