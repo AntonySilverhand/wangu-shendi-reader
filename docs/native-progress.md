@@ -170,3 +170,14 @@
 - 查询/跨窗口/关闭时也撤销旧的已投递锚点修正；最终原生复验成功（`/tmp/native-search-final-check.log`，exit 0）。Debug 签名与 aapt 包信息检查成功（独立 dev 包）。
 - 网页构建及 delivery 全过。focused 初跑 banner 断言失败且刷新等正文超时 120s；独立新上下文诊断恢复第 1 章 92 段、无页面错误；未改源码/测试的 focused 重跑全过。日志 `/tmp/native-search-web-check.log`、`/tmp/native-search-web-diagnostic.log`、`/tmp/native-search-web-rerun.log`；保留初次失败，不宣称已根治其线上/时序敏感性。`src/`、`test/`、旧 `android/` 本轮无源码改动。
 - F11/F12 改为 `in_progress` 并填实现/测试路径；P6 没有勾完成，设备 IME/返回/窗口/触摸验收仍未执行。
+
+### 多书、站内搜索与封面（2026-10-14，F23）
+
+- 对齐已完成的网页端书源层（`src/shared/source.ts`，提交 cd51f4c）：所有 URL / 链接 / 目录 / 章节函数显式带 `bookId`；`parseTocTotalPages` 单选项下拉=1 页、未知=null（不再回退 44）；正文第三种兜底（`h2.chapter-title` 之后的裸 `<p>`）；会员门槛提示 → `restricted`；`parseBookInfo`（og meta、首章 id）、`parseSearchResults`（桌面 `ul#novel-search` / 移动 `a.list`，去重、≤50）、`normalizeSearchQuery`；标题尾部括号通用清理替代写死的 `(飞天鱼)`。
+- 网络：桌面 UA；`SourceHttpClient.postForm`（只允许 `/search.html`，POST 不跟随任何 3xx，https→http 回退携带方法与正文）、`fetchBytes`（仅 `/img/{id}.jpg`，需 `image/*`，≤1 MiB）；`UrlSafetyValidator` 对任意合法书号放行 4 类页面（目录子页至 999、章节分页 1–39），POST 仅搜索、GET 图片仅封面，路径穿越防护不变。
+- 队列：`RequestKey.search/cover/bookInfo`；搜索 HIGH、封面 BACKGROUND（与目录 LOW 共用一个非 HIGH 槽）；`SearchGate` 在调度线程内睡眠，保证两次上游搜索 ≥5000 ms，不新增线程。
+- 应用：书架增加「搜索书源」、封面与「上次读到：章节标题（段落 N）」；默认书（36780）仅在 `default_book_seeded` 未设置时播种，移除后不会回来；在线书可移除（正文/目录行删除，个人数据保留）；「从头阅读」取第一条目录（无目录先载目录第 1 页，默认书保留写死首章作离线兜底）；新增 `BookSearchDialog`/`BookDetailDialog`、`CoverLoader`；目录加载器去掉 36780 限制、`total=44` 默认与 80 页上限（未知总页数先载 1–2 页再按发现的总页数，上限同校验器 1000 页）；`EnsureOnlineBookRunnable` 对已有书更新书名/作者；阅读器对 `restricted` 章节显示「源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制」。应用名改为「万书阅读器」。
+- 无 Room schema 变更、无迁移：`restricted` 标记借用章节行未被读取的 `missing_pages_json` 列（`RestrictedMarker`），旧行读作未受限。
+- 验证（本机临时安装 Temurin 17.0.20.1 + Android SDK 36/build-tools 36.0.0，Gradle 8.13 wrapper）：`bash tools/native/build.sh test`、`debug`、`check` 均 BUILD SUCCESSFUL；core 115 项、app 20 项 JVM 测试全部通过；lint 0 error / 22 warning（基线 21，新增 1 个 `ApplySharedPref`：播种标记在内容库线程用 `commit()`）；`tools/native/check-no-lambdas.sh` 检查 311 个 Java 文件通过；`aapt dump badging`：`org.wanshu.reader.native.dev` versionCode 16 / 0.0.16、标签「万书阅读器」。
+- 对真实站点做了一次性冒烟（未入库的临时驱动）：`SearchBooksAction` 搜「斗破苍穹」得 49 条；`FetchBookInfoAction`（104429）得首章 21930717；`FetchCoverBytesAction` 得 12741 字节 JPEG；`ChapterAssembler`+`HttpPageFetcher` 取该书第一章得 66 段、complete=true。
+- **未验证**：没有设备/模拟器，所有新界面（搜索/详情对话框、书架封面、受限提示、从头阅读的目录获取）只通过编译与 JVM 单测，未做真机交互、旋转、前后台与 IME 验收；`TocLoadJob` 的 Room/调度整合只有分页规则（`TocPaging`）被单测覆盖；移动端搜索模板只在 fixture 上验证。F23 因此保持 `in_progress`。
