@@ -12,7 +12,6 @@ import {
   parseChapterPage,
   parseTocPageHtml,
   parseTocTotalPages,
-  parseTotalPagesFromTocHtml,
   tocPath,
   chapterPath,
   buildChapterUrl,
@@ -21,6 +20,8 @@ import {
   extractDeclaredPageIndex,
   type TocItemRaw,
 } from '../src/shared/source.ts';
+
+const B = '36780';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = (name: string) => join(here, 'fixtures', name);
@@ -44,56 +45,56 @@ const noRetry = { retries: 0, sleep: () => Promise.resolve() } as const;
 
 describe('URL 构建受限', () => {
   it('目录页 URL', () => {
-    expect(tocPath(1)).toBe('/book/36780/');
-    expect(tocPath(2)).toBe('/book/36780/1.html');
-    expect(tocPath(44)).toBe('/book/36780/43.html');
-    expect(() => tocPath(0)).toThrow();
+    expect(tocPath(B, 1)).toBe('/book/36780/');
+    expect(tocPath(B, 2)).toBe('/book/36780/1.html');
+    expect(tocPath(B, 44)).toBe('/book/36780/43.html');
+    expect(() => tocPath(B, 0)).toThrow();
   });
   it('章节页 URL', () => {
-    expect(chapterPath('38621328')).toBe('/book/36780_38621328.html');
-    expect(chapterPath('38621328', 1)).toBe('/book/36780/38621328_1.html');
-    expect(buildChapterUrl('38621328', 2)).toBe(
+    expect(chapterPath(B, '38621328')).toBe('/book/36780_38621328.html');
+    expect(chapterPath(B, '38621328', 1)).toBe('/book/36780/38621328_1.html');
+    expect(buildChapterUrl(B, '38621328', 2)).toBe(
       'https://wanshuge.org/book/36780/38621328_2.html',
     );
-    expect(() => chapterPath('../../etc/passwd')).toThrow();
-    expect(() => chapterPath('12', 40)).toThrow();
+    expect(() => chapterPath(B, '../../etc/passwd')).toThrow();
+    expect(() => chapterPath(B, '12', 40)).toThrow();
   });
   it('章节链接解析', () => {
-    expect(parseChapterLink('/book/36780_38621328.html')).toEqual({
+    expect(parseChapterLink(B, '/book/36780_38621328.html')).toEqual({
       id: '38621328',
       pageIndex: 0,
     });
-    expect(parseChapterLink('/book/36780/38621328_1.html')).toEqual({
+    expect(parseChapterLink(B, '/book/36780/38621328_1.html')).toEqual({
       id: '38621328',
       pageIndex: 1,
     });
-    expect(parseChapterLink('https://evil.com/x')).toBeNull();
+    expect(parseChapterLink(B, 'https://evil.com/x')).toBeNull();
   });
   it('链接解析：绝对 URL / www / http / 协议相对 / query / hash', () => {
-    expect(parseChapterLink('https://wanshuge.org/book/36780_38621328.html')).toEqual({
+    expect(parseChapterLink(B, 'https://wanshuge.org/book/36780_38621328.html')).toEqual({
       id: '38621328',
       pageIndex: 0,
     });
-    expect(parseChapterLink('https://www.wanshuge.org/book/36780_38621328.html?x=1#top')).toEqual({
+    expect(parseChapterLink(B, 'https://www.wanshuge.org/book/36780_38621328.html?x=1#top')).toEqual({
       id: '38621328',
       pageIndex: 0,
     });
-    expect(parseChapterLink('http://wanshuge.org/book/36780/38621328_1.html?from=pc')).toEqual({
+    expect(parseChapterLink(B, 'http://wanshuge.org/book/36780/38621328_1.html?from=pc')).toEqual({
       id: '38621328',
       pageIndex: 1,
     });
-    expect(parseChapterLink('//wanshuge.org/book/36780/38621328_2.html')).toEqual({
+    expect(parseChapterLink(B, '//wanshuge.org/book/36780/38621328_2.html')).toEqual({
       id: '38621328',
       pageIndex: 2,
     });
     // 其它域名/非本书路径一律拒绝
-    expect(parseChapterLink('https://wanshuge.org/book/99999_38621328.html')).toBeNull();
-    expect(parseChapterLink('https://example.com/book/36780_38621328.html')).toBeNull();
-    expect(parseChapterLink('javascript:void(0)')).toBeNull();
-    expect(parseChapterLink('')).toBeNull();
+    expect(parseChapterLink(B, 'https://wanshuge.org/book/99999_38621328.html')).toBeNull();
+    expect(parseChapterLink(B, 'https://example.com/book/36780_38621328.html')).toBeNull();
+    expect(parseChapterLink(B, 'javascript:void(0)')).toBeNull();
+    expect(parseChapterLink(B, '')).toBeNull();
     // 目录分页页（/book/36780/1.html）不能被误认成章节
-    expect(parseChapterLink('/book/36780/1.html')).toBeNull();
-    expect(parseChapterLink('/book/36780/43.html')).toBeNull();
+    expect(parseChapterLink(B, '/book/36780/1.html')).toBeNull();
+    expect(parseChapterLink(B, '/book/36780/43.html')).toBeNull();
   });
   it('链接发现：单双引号、属性乱序、未加引号 href、script 干扰都能处理', () => {
     const raw = [
@@ -109,7 +110,7 @@ describe('URL 构建受限', () => {
     expect(hrefs).toContain('/book/36780/38621328_2.html');
     expect(hrefs).toContain('https://www.wanshuge.org/book/36780_38621328.html');
     // 页面级解析会先剥离 script，JS 字符串里的“链接”不应被当成导航
-    const page = parseChapterPage(raw, '38621328', 0);
+    const page = parseChapterPage(B, raw, '38621328', 0);
     expect(page.sameChapterPages).toEqual([1, 2]);
     expect(page.nextChapterId).toBeNull();
   });
@@ -124,7 +125,7 @@ describe('URL 构建受限', () => {
 
 describe('章节正文解析（真实 fixture）', () => {
   it('解析第 2771 章第 1 页', () => {
-    const page = parseChapterPage(html('chapter-38621328-p1.html'), '38621328', 0);
+    const page = parseChapterPage(B, html('chapter-38621328-p1.html'), '38621328', 0);
     expect(page.title).toBe('第二千七百七十一章 无疆到来');
     expect(page.paragraphs.length).toBeGreaterThan(20);
     expect(page.paragraphs[0]).toContain('佛祖舍利');
@@ -137,39 +138,39 @@ describe('章节正文解析（真实 fixture）', () => {
     }
   });
   it('第 2 页指向第 3 页，且不含上一章', () => {
-    const page = parseChapterPage(html('chapter-38621328-p2.html'), '38621328', 1);
+    const page = parseChapterPage(B, html('chapter-38621328-p2.html'), '38621328', 1);
     expect(page.title).toBe('第二千七百七十一章 无疆到来');
     expect(page.nextPageIndex).toBe(2);
     expect(page.prevChapterId).toBeNull();
     expect(page.paragraphs.length).toBeGreaterThan(20);
   });
   it('最后一页指向下一章', () => {
-    const page = parseChapterPage(html('chapter-38621328-p3.html'), '38621328', 2);
+    const page = parseChapterPage(B, html('chapter-38621328-p3.html'), '38621328', 2);
     expect(page.nextPageIndex).toBeNull();
     expect(page.nextChapterId).toBe('38621330');
     expect(page.prevChapterId).toBeNull();
   });
   it('用户原始链接对应的第 2772 章第 2 页', () => {
-    const page = parseChapterPage(html('chapter-38621330-p2.html'), '38621330', 1);
+    const page = parseChapterPage(B, html('chapter-38621330-p2.html'), '38621330', 1);
     expect(page.title).toContain('第二千七百七十二章');
     expect(page.nextPageIndex).toBe(2);
     expect(page.prevChapterId).toBeNull();
   });
   it('“分节阅读”占位标题章节也能解析', () => {
-    const page = parseChapterPage(html('chapter-13375259-p1.html'), '13375259', 0);
+    const page = parseChapterPage(B, html('chapter-13375259-p1.html'), '13375259', 0);
     expect(page.title).toBe('分节阅读第101节');
     expect(page.paragraphs.length).toBeGreaterThan(10);
     expect(page.nextPageIndex).toBe(1);
   });
   it('最早的第 1 章可以解析', () => {
-    const page = parseChapterPage(html('chapter-8924760-p1.html'), '8924760', 0);
+    const page = parseChapterPage(B, html('chapter-8924760-p1.html'), '8924760', 0);
     expect(page.paragraphs.length).toBeGreaterThan(5);
   });
 });
 
 describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）', () => {
   it('第 1 物理页：同章下一页链接在“下一章”按钮上（文字不可信，URL 才是语义）', () => {
-    const page = parseChapterPage(html('chapter-38621571-p1.html'), '38621571', 0);
+    const page = parseChapterPage(B, html('chapter-38621571-p1.html'), '38621571', 0);
     expect(page.title).toBe('第2871章 原来如此');
     expect(page.paragraphs.length).toBeGreaterThan(20);
     expect(page.paragraphs[0]).toContain('张若尘');
@@ -180,7 +181,7 @@ describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）'
     expect(page.declaredPageIndex).toBe(0);
   });
   it('第 2 物理页：上一/下一都指向同章分页', () => {
-    const page = parseChapterPage(html('chapter-38621571-p2.html'), '38621571', 1);
+    const page = parseChapterPage(B, html('chapter-38621571-p2.html'), '38621571', 1);
     expect(page.sameChapterPages).toEqual([0, 2]);
     expect(page.nextPageIndex).toBe(2);
     expect(page.prevChapterId).toBeNull();
@@ -189,7 +190,7 @@ describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）'
     expect(page.paragraphs.length).toBeGreaterThan(20);
   });
   it('第 3 物理页（末页）：真正下一章 38621574 在这里', () => {
-    const page = parseChapterPage(html('chapter-38621571-p3.html'), '38621571', 2);
+    const page = parseChapterPage(B, html('chapter-38621571-p3.html'), '38621571', 2);
     expect(page.sameChapterPages).toEqual([1]);
     expect(page.nextPageIndex).toBeNull();
     expect(page.prevChapterId).toBeNull();
@@ -198,8 +199,8 @@ describe('第 2871 章真实 fixture（38621571：3 个物理页 + 回环页）'
     expect(page.paragraphs.at(-1)).toBe('难怪荒天会亲自出手，夺走天尊宝纱。');
   });
   it('回环页：URL 是 _3，但内容/自报页码都是第 1 页', () => {
-    const loop = parseChapterPage(html('chapter-38621571-loopback.html'), '38621571', 3);
-    const first = parseChapterPage(html('chapter-38621571-p1.html'), '38621571', 0);
+    const loop = parseChapterPage(B, html('chapter-38621571-loopback.html'), '38621571', 3);
+    const first = parseChapterPage(B, html('chapter-38621571-p1.html'), '38621571', 0);
     expect(loop.declaredPageIndex).toBe(0); // 自报第 1 页，与请求的 3 不符
     expect(loop.paragraphs).toEqual(first.paragraphs);
   });
@@ -214,7 +215,7 @@ describe('第 4208 章真实 fixture（38626103：5 个物理页）', () => {
   }
 
   it('第 1 页解析：同章下一页在“下一章”按钮上，prev 是真上一章', () => {
-    const page = parseChapterPage(html('chapter-38626103-p1.html'), '38626103', 0);
+    const page = parseChapterPage(B, html('chapter-38626103-p1.html'), '38626103', 0);
     expect(page.title).toBe('第四千二百零八章 至高组会议');
     expect(page.sameChapterPages).toEqual([1]);
     expect(page.prevChapterId).toBe('38626097');
@@ -223,7 +224,7 @@ describe('第 4208 章真实 fixture（38626103：5 个物理页）', () => {
     expect(page.paragraphs.length).toBeGreaterThan(20);
   });
   it('第 5 页（末页）：真正下一章 38626110；上一章按钮虽指向 _3 也不影响语义', () => {
-    const page = parseChapterPage(html('chapter-38626103-p5.html'), '38626103', 4);
+    const page = parseChapterPage(B, html('chapter-38626103-p5.html'), '38626103', 4);
     expect(page.sameChapterPages).toEqual([3]); // 源站末页“上一章”指向 _3，URL 身份仍正确
     expect(page.nextPageIndex).toBeNull();
     expect(page.nextChapterId).toBe('38626110');
@@ -241,7 +242,7 @@ describe('第 4208 章真实 fixture（38626103：5 个物理页）', () => {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     };
-    const r = await fetchChapter('38626103', { fetcher, ...noRetry });
+    const r = await fetchChapter(B, '38626103', { fetcher, ...noRetry });
     expect(r.pageCount).toBe(5);
     expect(r.complete).toBe(true);
     expect(r.missingPages).toEqual([]);
@@ -268,7 +269,7 @@ describe('第 4208 章真实 fixture（38626103：5 个物理页）', () => {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     };
-    const r = await fetchChapter('38626103', { fetcher: failing, ...noRetry });
+    const r = await fetchChapter(B, '38626103', { fetcher: failing, ...noRetry });
     expect(r.pageCount).toBe(4); // 0..3 成功；_4 失败，探针 _5 得到 404（不存在的积极证据）
     expect(r.complete).toBe(false);
     expect(r.missingPages).toEqual([4]);
@@ -295,7 +296,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     };
-    const r = await fetchChapter('38621571', { fetcher, ...noRetry });
+    const r = await fetchChapter(B, '38621571', { fetcher, ...noRetry });
     expect(r.pageCount).toBe(3);
     expect(r.complete).toBe(true);
     expect(r.missingPages).toEqual([]);
@@ -314,7 +315,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
   });
 
   it('_1 抓取失败：保留已取内容、complete=false、missingPages 记录已知缺口', async () => {
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher(routes2871, ['/book/36780/38621571_1.html']),
       ...noRetry,
     });
@@ -327,7 +328,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
   });
 
   it('_2 抓取失败：同样不标 complete，继续拿其它已发现分页', async () => {
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher(routes2871, ['/book/36780/38621571_2.html']),
       ...noRetry,
     });
@@ -337,7 +338,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
   });
 
   it('回环证据：只有第 0 页且 _1 回环到第 1 页内容 → 单页章节能确认完整', async () => {
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher({
         '/book/36780_38621571.html': html('chapter-38621571-p1.html'),
         '/book/36780/38621571_1.html': html('chapter-38621571-loopback.html'),
@@ -350,7 +351,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
   });
 
   it('回环证据：_1 返回 404 → 同样视为“不存在更大分页”的积极证据', async () => {
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher({ '/book/36780_38621571.html': html('chapter-38621571-p1.html') }),
       ...noRetry,
     });
@@ -366,7 +367,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
       '/book/36780/38621571_1.html',
       '/book/36780_38621574.html',
     );
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher({ ...routes2871, '/book/36780_38621571.html': stale }),
       ...noRetry,
     });
@@ -381,7 +382,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
       /<div class="read_btn">[\s\S]*?<\/div>/g,
       '<div class="read_btn"></div>',
     );
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher(
         { '/book/36780_38621571.html': bare },
         ['/book/36780/38621571_1.html'],
@@ -398,7 +399,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
       /<div class="read_btn">[\s\S]*?<\/div>/g,
       '<div class="read_btn"></div>',
     );
-    const r = await fetchChapter('38621571', {
+    const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher({ '/book/36780_38621571.html': bare }),
       ...noRetry,
     });
@@ -409,18 +410,18 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
 
 describe('目录页解析（真实 fixture）', () => {
   it('第 1 页：置顶块 + 正文 1-100 章', () => {
-    const items = parseTocPageHtml(html('toc-page1.html'), 1);
+    const items = parseTocPageHtml(B, html('toc-page1.html'), 1);
     expect(items[0]!.title).toBe('新书元始法则发布了');
     expect(items.some((i) => i.title.startsWith('番外'))).toBe(true);
     expect(items.some((i) => i.title === '分节阅读第1节')).toBe(true);
     expect(items.some((i) => i.title === '分节阅读第100节')).toBe(true);
     // 详情页（第 1 页）没有页码选择器，总页数由后续页得知
-    expect(parseTocTotalPages(html('toc-page1.html'))).toBeNull();
-    expect(parseTocTotalPages(html('toc-page2.html'))).toBe(44);
-    expect(parseTotalPagesFromTocHtml(html('toc-page2.html'))).toBe(44);
+    expect(parseTocTotalPages(B, html('toc-page1.html'))).toBeNull();
+    expect(parseTocTotalPages(B, html('toc-page2.html'))).toBe(44);
+    expect(parseTocTotalPages(B, html('toc-page2.html'))).toBe(44);
   });
   it('第 2 页分类：正文 101-200，置顶番外进 extras，尾部快捷链接被剔除', () => {
-    const items = parseTocPageHtml(html('toc-page2.html'), 2);
+    const items = parseTocPageHtml(B, html('toc-page2.html'), 2);
     const { main, extras } = classifyTocItems(items, 2);
     expect(main[0]!.displayTitle).toBe('第101章');
     expect(main[main.length - 1]!.displayTitle).toBe('第200章');
@@ -430,8 +431,8 @@ describe('目录页解析（真实 fixture）', () => {
     expect(main.some((m) => m.displayTitle === '第1章')).toBe(false);
   });
   it('两页合并后正文连续（第1章 … 第200章）', () => {
-    const p1 = parseTocPageHtml(html('toc-page1.html'), 1);
-    const p2 = parseTocPageHtml(html('toc-page2.html'), 2);
+    const p1 = parseTocPageHtml(B, html('toc-page1.html'), 1);
+    const p2 = parseTocPageHtml(B, html('toc-page2.html'), 2);
     const c1 = classifyTocItems(p1, 1);
     const c2 = classifyTocItems(p2, 2);
     const merged = mergeTocEntries([
@@ -513,5 +514,172 @@ describe('标题归一化', () => {
     const main = merged.filter((e) => !e.extra);
     expect(main).toHaveLength(1);
     expect(main[0]!.title).toBe('第四千二百零八章 至高组会议');
+  });
+});
+
+describe('多书：任意书号（真实 fixture：104429 / 230580 / 14773）', () => {
+  it('URL 只由校验过的书号拼出', async () => {
+    const { tocPath: tp, chapterPath: cp, coverUrl, assertBookId } = await import('../src/shared/source.ts');
+    expect(tp('104429', 1)).toBe('/book/104429/');
+    expect(tp('104429', 17)).toBe('/book/104429/16.html');
+    expect(cp('230580', '72836267')).toBe('/book/230580_72836267.html');
+    expect(cp('230580', '72836267', 2)).toBe('/book/230580/72836267_2.html');
+    expect(coverUrl('104429')).toBe('https://wanshuge.org/img/104429.jpg');
+    for (const bad of ['', '0', '01', 'abc', '1/../2', '1234567890', '36780?x']) {
+      expect(() => assertBookId(bad)).toThrow();
+      expect(() => tp(bad, 1)).toThrow();
+    }
+  });
+
+  it('parseChapterLink 只认本书链接，站内其他书的推荐链接一律忽略', () => {
+    expect(parseChapterLink('104429', '/book/104429_21930803.html')).toEqual({ id: '21930803', pageIndex: 0 });
+    expect(parseChapterLink('104429', '/book/104429/21930803_1.html')).toEqual({ id: '21930803', pageIndex: 1 });
+    expect(parseChapterLink('104429', '/book/36780_21930803.html')).toBeNull();
+    expect(parseChapterLink('36780', '/book/104429_21930803.html')).toBeNull();
+    expect(parseChapterLink('104429', '/book/104429/16.html')).toBeNull();
+    expect(parseChapterLink('bad', '/book/bad_1.html')).toBeNull();
+  });
+
+  it('总页数：17 页的书读 select；≤100 章的书 select 只有一项 → 1 页；详情页未知', () => {
+    expect(parseTocTotalPages('104429', html('book-104429-p2.html'))).toBe(17);
+    expect(parseTocTotalPages('14773', html('toc-14773-p2.html'))).toBe(2);
+    expect(parseTocTotalPages('230580', html('book-230580-p2.html'))).toBe(1);
+    expect(parseTocTotalPages('104429', html('book-104429-p1.html'))).toBeNull();
+  });
+
+  it('单页目录：第 1 页 + 回环的第 2 页合并后按上传顺序、无重复', () => {
+    const merged = mergeTocPages([
+      parseTocPageHtml('230580', html('book-230580-p1.html'), 1),
+      parseTocPageHtml('230580', html('book-230580-p2.html'), 2),
+    ]);
+    expect(merged.map((e) => e.displayTitle)).toEqual([
+      '人物介绍',
+      ...Array.from({ length: 16 }, (_, i) => `第${i + 1}章`),
+    ]);
+  });
+
+  it('第 1 页（详情页）的 og meta → 书籍信息，简介去掉站点套话', async () => {
+    const { parseBookInfo } = await import('../src/shared/source.ts');
+    const a = parseBookInfo('104429', html('book-104429-p1.html'))!;
+    expect(a).toMatchObject({
+      id: '104429',
+      title: '斗破苍穹',
+      author: '九支书竹',
+      status: '连载中',
+      firstChapterId: '21930717',
+    });
+    expect(a.intro).toMatch(/^三十三诸天世界/);
+    const b = parseBookInfo('230580', html('book-230580-p1.html'))!;
+    expect(b.title).toBe('万古神帝之万古青鹿传');
+    expect(b.intro).toBeUndefined(); // 只有套话
+    expect(b.firstChapterId).toBe('72836267');
+    expect(parseBookInfo('36780', html('toc-page1.html'))!.firstChapterId).toBe('8924760');
+  });
+
+  it('正文为裸 <p>（无 qsbs、无 #content）时也能解析，且不混入推荐书链接', () => {
+    const page = parseChapterPage('230580', html('chapter-230580-72836267-p1.html'), '72836267', 0);
+    expect(page.title).toBe('人物介绍');
+    expect(page.paragraphs.length).toBeGreaterThanOrEqual(5);
+    expect(page.paragraphs[0]).toMatch(/^青鹿神王/);
+    expect(page.paragraphs.join('')).not.toMatch(/请勿开启|万书阁/);
+    expect(page.nextChapterId).toBe('72836268');
+    expect(page.restricted).toBe(false);
+  });
+
+  it('源站会员门槛：标记 restricted，门槛提示不进正文（不绕过）', () => {
+    const page = parseChapterPage('230580', html('chapter-230580-89420896-vip.html'), '89420896', 0);
+    expect(page.restricted).toBe(true);
+    expect(page.paragraphs).toHaveLength(5);
+    expect(page.paragraphs.join('')).not.toMatch(/VIP|后续内容已被隐藏/);
+    expect(page.nextChapterId).toBe('89420897');
+  });
+
+  it('fetchChapter 透传 restricted；单页章节靠探针 404 确认完整', async () => {
+    const fetcher = fixtureFetcher({
+      '/book/230580_89420896.html': html('chapter-230580-89420896-vip.html'),
+    });
+    const r = await fetchChapter('230580', '89420896', { fetcher, ...noRetry });
+    expect(r.restricted).toBe(true);
+    expect(r.complete).toBe(true);
+    expect(r.paragraphs).toHaveLength(5);
+  });
+
+  it('其他书的编码正文与分页发现照常工作', () => {
+    const page = parseChapterPage('104429', html('chapter-104429-21930803-p1.html'), '21930803', 0);
+    expect(page.title).toBe('第八章吐血的莫小狼');
+    expect(page.paragraphs.length).toBeGreaterThan(20);
+    expect(page.sameChapterPages).toEqual([1]);
+    expect(page.prevChapterId).toBe('21930792');
+  });
+});
+
+describe('站内搜索', () => {
+  it('桌面模板：书号/书名/作者/分类/最新章', async () => {
+    const { parseSearchResults } = await import('../src/shared/source.ts');
+    const r = parseSearchResults(html('search-desktop.html'))!;
+    expect(r.length).toBeGreaterThan(20);
+    expect(r[0]).toEqual({
+      id: '17542',
+      title: '斗破苍穹之重生萧玄',
+      author: '爱蹦迪的奶牛',
+      category: '言情小说',
+      latestChapter: '第六章 富贵险中求',
+      updated: '08-07',
+    });
+    expect(r.find((b) => b.id === '104429')?.title).toBe('斗破苍穹');
+    expect(new Set(r.map((b) => b.id)).size).toBe(r.length);
+  });
+
+  it('移动模板：只取结果区，不混入“完结小说推荐”', async () => {
+    const { parseSearchResults, MAX_SEARCH_RESULTS } = await import('../src/shared/source.ts');
+    const r = parseSearchResults(html('search-mobile.html'))!;
+    expect(r.length).toBeGreaterThan(10);
+    expect(r.length).toBeLessThanOrEqual(MAX_SEARCH_RESULTS);
+    expect(r[0]!.id).toBe('14455');
+    expect(r[0]!.intro).toMatch(/^穿越斗破/);
+  });
+
+  it('无结果容器 → null；空结果 → []', async () => {
+    const { parseSearchResults } = await import('../src/shared/source.ts');
+    expect(parseSearchResults('<html><body>blocked</body></html>')).toBeNull();
+    expect(parseSearchResults('<ul class="txt-list" id="novel-search">请输入搜索词</ul>')).toEqual([]);
+  });
+
+  it('搜索词规范化：裁剪空白、限长、拒绝控制字符', async () => {
+    const { normalizeSearchQuery } = await import('../src/shared/source.ts');
+    expect(normalizeSearchQuery('  斗破   苍穹 ')).toBe('斗破 苍穹');
+    expect(normalizeSearchQuery('')).toBeNull();
+    expect(normalizeSearchQuery('   ')).toBeNull();
+    expect(normalizeSearchQuery('a\u0000b')).toBeNull();
+    expect(normalizeSearchQuery('字'.repeat(31))).toBeNull();
+    expect(normalizeSearchQuery('字'.repeat(30))).toBe('字'.repeat(30));
+  });
+
+  it('searchBooks 以 POST 表单发送，并保持两次上游搜索的最小间隔', async () => {
+    const { searchBooks, resetSearchGate, MIN_SEARCH_GAP_MS } = await import('../src/shared/source.ts');
+    resetSearchGate();
+    const calls: { url: string; method?: string; body?: unknown; ct?: string }[] = [];
+    const fetcher = async (url: string, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      calls.push({ url, method: init?.method, body: init?.body, ct: headers['Content-Type'] });
+      return new Response(html('search-desktop.html'), { status: 200, headers: { 'content-type': 'text/html' } });
+    };
+    const waits: number[] = [];
+    const sleep = (ms: number) => {
+      waits.push(ms);
+      return Promise.resolve();
+    };
+    const r = await searchBooks(' 斗破苍穹 ', { fetcher, retries: 0, sleep });
+    expect(r.length).toBeGreaterThan(20);
+    expect(calls[0]).toEqual({
+      url: 'https://wanshuge.org/search.html',
+      method: 'POST',
+      body: `s=${encodeURIComponent('斗破苍穹')}`,
+      ct: 'application/x-www-form-urlencoded',
+    });
+    await searchBooks('万古神帝', { fetcher, retries: 0, sleep });
+    expect(waits.some((w) => w > MIN_SEARCH_GAP_MS - 1000)).toBe(true);
+    await expect(searchBooks('', { fetcher, retries: 0, sleep })).rejects.toThrow();
+    resetSearchGate();
   });
 });

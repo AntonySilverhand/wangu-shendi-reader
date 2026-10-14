@@ -103,11 +103,11 @@ try {
     const stats = await page.locator('[data-testid=data-sheet] .stat').count();
     check('数据面板显示缓存统计', stats >= 3, `${stats} 项`);
     await page.setInputFiles('input[type=file][accept*=".txt"]', txtPath);
-    await page.waitForSelector('.quick-card:has-text("regression-book")', { timeout: 60_000 });
+    await page.waitForSelector('.shelf-card:has-text("regression-book")', { timeout: 60_000 });
     check('导入后出现在书架', true);
-    await page.click('.quick-card:has-text("regression-book") button:has-text("打开")');
+    await page.click('.shelf-card:has-text("regression-book") .shelf-open');
     await page.waitForFunction(
-      () => location.hash.startsWith('#/read/') && document.querySelectorAll('#chapter-content p').length > 0,
+      () => /^#\/book\/[^/]+\/read\//.test(location.hash) && document.querySelectorAll('#chapter-content p').length > 0,
       null,
       { timeout: 60_000 },
     );

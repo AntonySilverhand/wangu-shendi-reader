@@ -5,7 +5,8 @@ import { clear, el, iconButton, on } from './dom.ts';
 import { ReaderView } from './views/reader.ts';
 import { TocView } from './views/toc-view.ts';
 import { ChapterSearch } from './views/search-view.ts';
-import { renderHome } from './views/home-view.ts';
+import { renderHome, type ShelfBook } from './views/home-view.ts';
+import { DiscoverView } from './views/discover-view.ts';
 import { openSettingsSheet, openDataSheet, openDownloadSheet, openAboutSheet, type SettingsDeps } from './views/settings-view.ts';
 import { openBookmarksSheet } from './views/bookmarks-view.ts';
 import { closeActiveSheet, hasActiveSheet } from './ui/sheet.ts';
@@ -17,27 +18,30 @@ import { PersonalStore, type Bookmark, type ReadingPosition } from './store/pers
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
-import { listChapterIds, clearBookContent } from './store/db.ts';
+import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
-import { BOOK, type TocEntry } from '../shared/source.ts';
-import { excerpt } from './format.ts';
+import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
+import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
+import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 
-const REMOTE_BOOK_ID = BOOK.id;
+const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
 
-type View = 'home' | 'reader';
+type View = 'home' | 'reader' | 'discover';
 
 export class App {
   readonly settings = new SettingsStore();
   readonly personal = new PersonalStore();
+  readonly library = new LibraryStore();
   private toc: TocStore;
+  private discover: DiscoverView;
   private download: DownloadManager;
   private reader: ReaderView;
   private tocView: TocView;
   private search: ChapterSearch;
 
-  private bookId: string = REMOTE_BOOK_ID;
   private localBooks: LocalBookMeta[] = listLocalBooks();
+  private bookId: string = this.initialBookId();
   private currentChapterId: string | null = null;
   private renderedChapterId: string | null = null;
   private loadingChapterId: string | null = null;
@@ -66,7 +70,7 @@ export class App {
   private bottombarBookmark!: HTMLButtonElement;
 
   constructor() {
-    this.toc = new TocStore(this.bookId);
+    this.toc = this.createTocStore(this.bookId);
     this.download = this.createDownloadManager();
     this.layout = new LayoutController({
       onModeChange: (mode, prev) => {
@@ -93,15 +97,28 @@ export class App {
       onPositionChange: (pos) => this.savePosition(pos),
       onRequestRetry: () => this.currentChapterId && void this.openChapter(this.currentChapterId, { force: true }),
     });
-    this.tocView = new TocView({
-      store: this.toc,
-      onOpenChapter: (id) => {
-        if (this.layout.current === 'compact') this.tocView.close();
-        void this.openChapter(id);
+    this.tocView = this.createTocView();
+    this.discover = new DiscoverView({
+      library: this.library,
+      onBack: () => {
+        location.hash = '';
       },
-      onOpenTocData: () => this.openData(),
-      getCurrentChapterId: () => this.currentChapterId,
-      onOpenChange: () => this.syncImmersive(),
+      onRead: (book) => void this.readFromSource(book),
+      onAdd: (book) => {
+        this.library.upsert(book);
+        showToast(`已加入书架：${book.title}`);
+      },
+      onRemove: (bookId) => void this.removeBook(bookId),
+      onQueryChange: (q) => {
+        const target = `#/search?q=${encodeURIComponent(q)}`;
+        if (location.hash !== target) location.hash = target;
+      },
+      hasProgress: (bookId) => this.personal.getProgress(bookId) !== null,
+    });
+    this.library.subscribe(() => {
+      this.discover.refresh();
+      if (this.view === 'home') this.renderHomeView();
+      this.updateTopbar();
     });
     this.search = new ChapterSearch({
       onOpenChange: (open) => {
@@ -110,6 +127,61 @@ export class App {
         this.searchOpen = open;
         this.syncImmersive();
       },
+    });
+  }
+
+  /** 启动时打开哪本书：上次的书 → 书架第一本 → 预置书 */
+  private initialBookId(): string {
+    const active = this.library.activeBookId;
+    if (active && this.bookExists(active)) return active;
+    const first = this.shelfBooks()[0];
+    return first?.id ?? DEFAULT_BOOK.id;
+  }
+
+  private bookExists(bookId: string): boolean {
+    if (isRemoteBookId(bookId)) return this.library.has(bookId);
+    return this.localBooks.some((b) => b.id === bookId);
+  }
+
+  /** 书架：远程书 + 本地导入书，按最近阅读（无则加入时间）倒序 */
+  private shelfBooks(): ShelfBook[] {
+    const sortKey = (id: string, fallback: number) => this.personal.getProgress(id)?.updatedAt ?? fallback;
+    const remote: ShelfBook[] = this.library.list().map((b) => ({
+      id: b.id,
+      title: b.title,
+      author: b.author,
+      local: false,
+      sortKey: sortKey(b.id, b.addedAt),
+    }));
+    const local: ShelfBook[] = this.localBooks.map((b) => ({
+      id: b.id,
+      title: b.title,
+      author: '本地导入',
+      local: true,
+      sortKey: sortKey(b.id, b.importedAt),
+      note: `${b.chapters} 章 · ${formatTime(b.importedAt)}导入`,
+    }));
+    return [...remote, ...local].sort((a, b) => b.sortKey - a.sortKey);
+  }
+
+  private createTocStore(bookId: string): TocStore {
+    const toc = new TocStore(bookId);
+    // 本地导入书籍：目录只读 IndexedDB，不访问网络
+    toc.offline = !isRemoteBookId(bookId);
+    toc.onBookInfo = (info: BookInfo) => this.library.refresh(info);
+    return toc;
+  }
+
+  private createTocView(): TocView {
+    return new TocView({
+      store: this.toc,
+      onOpenChapter: (id) => {
+        if (this.layout.current === 'compact') this.tocView.close();
+        void this.openChapter(id);
+      },
+      onOpenTocData: () => this.openData(),
+      getCurrentChapterId: () => this.currentChapterId,
+      onOpenChange: () => this.syncImmersive(),
     });
   }
 
@@ -133,7 +205,7 @@ export class App {
       await this.toc.init();
       await this.refreshCachedIds(true);
       this.renderHomeView();
-      if (this.toc.loadedPageCount === 0) {
+      if (this.toc.loadedPageCount === 0 && isRemoteBookId(this.bookId) && this.bookExists(this.bookId)) {
         // 首页空闲时预取前几页目录，避免打开目录时空白
         const idle = (cb: () => void) =>
           'requestIdleCallback' in window
@@ -164,8 +236,9 @@ export class App {
         showToast(`已清理 ${n} 条旧版缓存，将自动重新获取`);
       }
     });
-    this.applyRoute();
-    if (this.layout.current !== 'compact' && window.innerWidth >= 1100) this.tocView.open();
+    this.library.setActive(this.bookId);
+    await this.applyRoute();
+    if (this.layout.current !== 'compact' && window.innerWidth >= 1100 && this.view === 'reader') this.tocView.open();
     document.getElementById('app')?.setAttribute('aria-busy', 'false');
   }
 
@@ -189,6 +262,7 @@ export class App {
     const topbar = el(
       'header',
       { class: 'topbar', id: 'topbar' },
+      iconButton({ label: '书架', icon: 'home', testId: 'home-btn', onClick: () => this.goHome() }),
       iconButton({ label: '目录', icon: 'list', testId: 'toc-btn', onClick: () => this.tocView.toggle() }),
       el('div', { class: 'topbar-title' }, this.topbarTitleMain, this.topbarTitleSub),
       iconButton({ label: '本章内搜索', icon: 'search', testId: 'search-btn', onClick: () => this.search.toggle() }),
@@ -270,6 +344,7 @@ export class App {
     this.appEl.appendChild(this.tocView.panel);
     this.appEl.appendChild(bottombar);
     this.appEl.appendChild(this.homeContainer);
+    this.appEl.appendChild(this.discover.root);
     this.appEl.appendChild(this.search.element);
     this.appEl.appendChild(this.netStatusEl);
     this.reader.mount();
@@ -298,7 +373,7 @@ export class App {
   /* ------------------------------ 事件 ------------------------------ */
 
   private bindEvents(): void {
-    on(window, 'hashchange', () => this.applyRoute());
+    on(window, 'hashchange', () => void this.applyRoute());
     on(window, 'online', () => this.updateNetStatus());
     on(window, 'offline', () => this.updateNetStatus());
     on(document, 'visibilitychange', () => {
@@ -423,26 +498,97 @@ export class App {
 
   /* ------------------------------ 路由 ------------------------------ */
 
-  private applyRoute(): void {
+  /**
+   * 路由：
+   *  #/book/{bookId}/read/{chapterId}  阅读
+   *  #/book/{bookId}/toc               目录
+   *  #/book/{bookId}                   切到该书并回书架
+   *  #/search?q=                       书源搜索
+   *  #/read/{chapterId}、#/toc         旧链接（预置书 / 当前书）
+   */
+  private async applyRoute(): Promise<void> {
     const hash = location.hash.replace(/^#/, '');
-    const match = hash.match(/^\/read\/(\d{1,12})$/);
-    if (match) {
-      void this.openChapter(match[1]!, { push: false });
+    const search = hash.match(/^\/search(?:\?q=([^&]*))?$/);
+    if (search) {
+      let q: string | null = null;
+      try {
+        q = search[1] !== undefined ? decodeURIComponent(search[1]) : null;
+      } catch {
+        q = null;
+      }
+      this.showDiscover(q);
+      return;
+    }
+    const bookRoute = hash.match(/^\/book\/([A-Za-z0-9-]{1,40})(\/read\/(\d{1,12})|\/toc)?\/?$/);
+    const legacyRead = hash.match(/^\/read\/(\d{1,12})$/);
+    if (bookRoute || legacyRead) {
+      const bookId = bookRoute ? bookRoute[1]! : DEFAULT_BOOK.id;
+      if (!(await this.ensureBook(bookId))) {
+        showToast('找不到这本书');
+        location.hash = '';
+        return;
+      }
+      const chapterId = bookRoute ? bookRoute[3] : legacyRead![1];
+      if (chapterId) {
+        void this.openChapter(chapterId, { push: false });
+        if (legacyRead) history.replaceState(null, '', `#/book/${bookId}/read/${chapterId}`);
+      } else if (bookRoute?.[2] === '/toc') {
+        this.openTocView();
+      } else {
+        this.showHome();
+      }
       return;
     }
     if (hash.startsWith('/toc')) {
-      this.setView('reader');
-      this.tocView.open();
-      this.updateTopbar();
+      this.openTocView();
       return;
     }
     this.showHome();
+  }
+
+  private openTocView(): void {
+    this.setView('reader');
+    this.tocView.open();
+    this.updateTopbar();
+  }
+
+  /** 让 bookId 成为当前书（不改变视图）。远程书不在书架上时以占位信息加入，目录加载后补全。 */
+  private async ensureBook(bookId: string): Promise<boolean> {
+    if (isRemoteBookId(bookId)) {
+      if (!this.library.has(bookId)) this.library.upsert({ id: bookId, title: `书号 ${bookId}` });
+    } else if (!isLocalBookId(bookId) || !this.localBooks.some((b) => b.id === bookId)) {
+      return false;
+    }
+    if (bookId !== this.bookId) await this.activateBook(bookId);
+    return true;
+  }
+
+  private goHome(): void {
+    if (location.hash === '' || location.hash === '#') this.showHome();
+    else location.hash = '';
+  }
+
+  private showDiscover(query: string | null): void {
+    this.reader.flushPosition();
+    this.chapterController?.abort();
+    this.chapterGeneration++;
+    this.loadingChapterId = null;
+    this.cancelPrefetch();
+    this.tocView.close();
+    this.setView('discover');
+    this.discover.show(query);
+  }
+
+  private openDiscover(): void {
+    location.hash = '#/search';
   }
 
   private setView(view: View): void {
     this.view = view;
     this.appEl.dataset.view = view;
     this.homeContainer.hidden = view !== 'home';
+    if (view === 'discover') this.discover.root.hidden = false;
+    else this.discover.hide();
     this.updateWakeLock();
     this.syncImmersive();
   }
@@ -460,12 +606,12 @@ export class App {
 
   private renderHomeView(): void {
     renderHome(this.homeContainer, {
-      bookId: this.bookId,
+      bookId: this.bookExists(this.bookId) ? this.bookId : null,
       bookTitle: this.currentBookTitle(),
-      bookAuthor: this.bookId === REMOTE_BOOK_ID ? BOOK.author : '本地导入',
+      bookAuthor: this.currentBookAuthor(),
       personal: this.personal,
       toc: this.toc,
-      localBooks: this.localBooks,
+      shelf: this.shelfBooks(),
       onContinue: () => this.continueReading(),
       onOpenChapter: (id) => void this.openChapter(id, { restorePosition: false }),
       onOpenToc: () => {
@@ -478,15 +624,21 @@ export class App {
       onOpenBookmarks: () => this.openBookmarks(),
       onOpenData: () => this.openData(),
       onOpenSettings: () => this.openSettings(),
+      onOpenDiscover: () => this.openDiscover(),
       onSwitchBook: (id) => void this.openBook(id),
-      onRemoveLocalBook: (id) => void this.removeLocalBook(id),
+      onRemoveBook: (id) => void this.removeBook(id),
       onImportTxt: () => this.pickTxtFile(),
     });
   }
 
   private currentBookTitle(): string {
-    if (this.bookId === REMOTE_BOOK_ID) return BOOK.title;
+    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? `书号 ${this.bookId}`;
     return this.localBooks.find((b) => b.id === this.bookId)?.title ?? '本地书籍';
+  }
+
+  private currentBookAuthor(): string {
+    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.author || '佚名';
+    return '本地导入';
   }
 
   /* ---------------------------- 阅读流程 ---------------------------- */
@@ -539,8 +691,9 @@ export class App {
   ): Promise<void> {
     const sameRendered = chapterId === this.renderedChapterId;
     const alreadyLoading = chapterId === this.loadingChapterId;
-    if (opts.push !== false && location.hash !== `#/read/${chapterId}`) {
-      location.hash = `#/read/${chapterId}`;
+    const route = `#/book/${this.bookId}/read/${chapterId}`;
+    if (opts.push !== false && location.hash !== route) {
+      location.hash = route;
     }
     if (this.renderedChapterId && !sameRendered) this.reader.flushPosition();
     this.currentChapterId = chapterId;
@@ -626,6 +779,8 @@ export class App {
     this.search.setContent(this.reader.contentElement);
     if (record.source === 'local') {
       this.reader.showBanner('本地导入内容');
+    } else if (record.restricted) {
+      this.reader.showBanner('源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制');
     } else if (record.missingPages && record.missingPages.length > 0) {
       this.reader.showBanner('本章后续内容未取到（源站波动）', [
         {
@@ -696,7 +851,7 @@ export class App {
 
   private savePosition(pos: { paragraph: number; offset: number }): void {
     const chapterId = this.reader.currentChapterId;
-    if (!chapterId) return;
+    if (!chapterId || this.reader.currentBookId !== this.bookId) return;
     const index = this.toc.indexOfChapter(chapterId);
     const value: ReadingPosition = {
       chapterId,
@@ -757,7 +912,7 @@ export class App {
 
   private schedulePrefetch(nextId: string | null): void {
     this.cancelPrefetch();
-    if (!nextId || this.bookId !== REMOTE_BOOK_ID) return;
+    if (!nextId || !isRemoteBookId(this.bookId)) return;
     if (!this.settings.get().prefetch) return;
     const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
     if (conn?.saveData) return;
@@ -829,9 +984,14 @@ export class App {
       onImportPersonal: (json, mode) => {
         const result = this.personal.importData(json, mode);
         if (result.settings) this.settings.replace({ ...this.settings.get(), ...result.settings });
+        try {
+          this.library.importData((JSON.parse(json) as { library?: unknown }).library);
+        } catch {
+          /* 旧备份没有书架信息 */
+        }
         this.renderHomeView();
       },
-      onExportPersonal: () => this.personal.exportData(this.settings.get()),
+      onExportPersonal: () => this.personal.exportData(this.settings.get(), { library: this.library.exportData() }),
       onImportTxt: (file) => this.handleTxtImport(file),
       onExportTxt: (from, to) => this.handleTxtExport(from, to),
       onInstallPwa: this.installPrompt ? () => void this.installPrompt?.prompt() : undefined,
@@ -920,7 +1080,7 @@ export class App {
 
   /** 打开某本书：切换后继续上次进度，无进度则读第一章 */
   private async openBook(bookId: string): Promise<void> {
-    if (bookId !== this.bookId) await this.switchBook(bookId);
+    if (!(await this.ensureBook(bookId))) return;
     const progress = this.personal.getProgress(bookId);
     if (progress) {
       await this.openChapter(progress.chapterId, { restorePosition: true });
@@ -929,56 +1089,79 @@ export class App {
     await this.openFirstAvailable(() => 0, '正在打开书籍…');
   }
 
+  /** 从搜索结果/详情开始读：加入书架后打开 */
+  private async readFromSource(book: BookSummary | BookInfo): Promise<void> {
+    this.library.upsert(book);
+    await this.openBook(book.id);
+  }
+
+  /** 切换到某本书并回书架 */
   private async switchBook(bookId: string): Promise<void> {
-    if (bookId === this.bookId) {
-      this.showHome();
-      return;
-    }
+    if (bookId !== this.bookId) await this.activateBook(bookId);
+    if (location.hash === '' || location.hash === '#') this.showHome();
+    else location.hash = '';
+  }
+
+  /** 切换当前书（不改变视图与地址栏） */
+  private async activateBook(bookId: string): Promise<void> {
     closeActiveSheet();
     this.reader.flushPosition();
     this.chapterController?.abort();
     this.chapterGeneration++;
     this.cancelPrefetch();
     this.bookId = bookId;
+    this.library.setActive(bookId);
     this.currentChapterId = null;
     this.renderedChapterId = null;
     this.loadingChapterId = null;
     this.currentEntry = null;
     this.tocView.close();
-    this.toc = new TocStore(bookId);
-    this.toc.offline = bookId !== REMOTE_BOOK_ID;
-    this.tocView = new TocView({
-      store: this.toc,
-      onOpenChapter: (id) => {
-        if (this.layout.current === 'compact') this.tocView.close();
-        void this.openChapter(id);
-      },
-      onOpenTocData: () => this.openData(),
-      getCurrentChapterId: () => this.currentChapterId,
-      onOpenChange: () => this.syncImmersive(),
-    });
+    this.toc = this.createTocStore(bookId);
+    this.tocView = this.createTocView();
     const oldPanel = document.getElementById('toc-panel');
     oldPanel?.replaceWith(this.tocView.panel);
     this.download = this.createDownloadManager();
+    this.download.subscribeDownload(() => void this.refreshCachedIds());
     await this.toc.init();
     await this.refreshCachedIds(true);
-    this.renderHomeView();
-    location.hash = '';
-    this.showHome();
+    this.updateTopbar();
+    if (this.view === 'home') this.renderHomeView();
   }
 
-  private async removeLocalBook(bookId: string): Promise<void> {
-    const ok = await confirmDialog('移除这本本地导入的书？其缓存正文将一并删除。');
+  /** 移出书架：删除正文与目录缓存；阅读进度和书签保留（重新加入后可恢复） */
+  private async removeBook(bookId: string): Promise<void> {
+    const local = !isRemoteBookId(bookId);
+    const title = local
+      ? this.localBooks.find((b) => b.id === bookId)?.title
+      : this.library.get(bookId)?.title;
+    const ok = await confirmDialog(
+      local
+        ? `移除《${title ?? '本地书'}》？导入的正文将一并删除（无法从书源恢复）。`
+        : `把《${title ?? bookId}》移出书架？已缓存的正文会删除；阅读进度和书签保留，重新加入后可恢复。`,
+    );
     if (!ok) return;
-    await clearBookContent(bookId);
-    this.localBooks = this.localBooks.filter((b) => b.id !== bookId);
     try {
-      localStorage.setItem('reader.localbooks.v1', JSON.stringify(this.localBooks));
+      await clearBookContent(bookId);
+      await deleteToc(bookId);
     } catch {
-      /* 忽略 */
+      /* 存储不可用：仍从书架移除 */
     }
-    if (this.bookId === bookId) await this.switchBook(REMOTE_BOOK_ID);
-    else this.renderHomeView();
-    showToast('已移除');
+    if (local) {
+      this.localBooks = this.localBooks.filter((b) => b.id !== bookId);
+      try {
+        localStorage.setItem(LOCAL_BOOKS_KEY, JSON.stringify(this.localBooks));
+      } catch {
+        /* 忽略 */
+      }
+    } else {
+      this.library.remove(bookId);
+    }
+    if (this.bookId === bookId) {
+      const next = this.shelfBooks()[0];
+      if (next) await this.activateBook(next.id);
+      else this.renderHomeView();
+    }
+    if (this.view === 'home') this.renderHomeView();
+    showToast('已移出书架');
   }
 }

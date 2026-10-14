@@ -13,6 +13,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.Locale;
+import org.wanshu.reader.core.model.BookKey;
 import org.wanshu.reader.data.AppExecutors;
 import org.wanshu.reader.data.content.StorageStats;
 import org.wanshu.reader.data.personal.entity.SettingsEntity;
@@ -150,7 +151,7 @@ public final class SettingsDialog extends Dialog implements Runnable, View.OnCli
         if (stats != null) text(String.format(Locale.ROOT, "完整 %d 章 · 部分 %d 章 · %.1f MiB",
                 stats.getCompletedCount(), stats.getPartialCount(), stats.getTotalBytes() / 1048576.0));
         ActionFlowLayout data = row();
-        if ("36780".equals(bookId)) action(data, "清理在线正文缓存", "clear");
+        if (BookKey.isOnlineId(bookId)) action(data, "清理在线正文缓存", "clear");
         else text("本地 TXT 不会被清理正文缓存删除。请保留原 TXT 文件。");
         if (getOwnerActivity() instanceof MainActivity) {
             action(data, "导出个人 JSON", "export");
@@ -179,7 +180,7 @@ public final class SettingsDialog extends Dialog implements Runnable, View.OnCli
                 .setNegativeButton("取消", null).setPositiveButton("清理", this).show();
     }
     private void executeClearRemoteCache() {
-        if (!"36780".equals(bookId) || saving) return;
+        if (!BookKey.isOnlineId(bookId) || saving) return;
         saving = true; reader.cancelActiveRequest(); render();
         content.clearRemoteCache(bookId, new SettingsClearCacheCallback(this));
     }

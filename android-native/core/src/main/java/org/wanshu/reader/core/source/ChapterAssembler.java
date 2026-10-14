@@ -208,6 +208,14 @@ public class ChapterAssembler {
                 ? lastPage.getNextChapterId()
                 : firstPage.getNextChapterId();
 
+        boolean restricted = false;
+        for (int i = 0; i < sortedPages.size(); i++) {
+            if (sortedPages.get(i).isRestricted()) {
+                restricted = true;
+                break;
+            }
+        }
+
         return new ChapterResult(
                 bookId,
                 chapterId,
@@ -218,7 +226,9 @@ public class ChapterAssembler {
                 sortedPages.size(),
                 totalChars,
                 complete,
-                sortedMissing
+                sortedMissing,
+                ChapterResult.CURRENT_SOURCE_SEMANTICS_VERSION,
+                restricted
         );
     }
 

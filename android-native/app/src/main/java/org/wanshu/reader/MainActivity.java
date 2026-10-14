@@ -59,7 +59,8 @@ public class MainActivity extends ComponentActivity implements DataCallback<Stri
                 container.getNavigator(),
                 container.getExecutors(),
                 container.getTextBlockBuilder(),
-                container.getContentDb()
+                container.getContentDb(),
+                container
         );
 
         readerController = new ReaderController(
@@ -91,6 +92,7 @@ public class MainActivity extends ComponentActivity implements DataCallback<Stri
     @Override
     protected void onPause() {
         if (container != null) container.getPersonalDataTransfer().detach(this);
+        if (container != null) container.getCoverLoader().cancelPending();
         if (readerController != null) {
             if (container.getNavigator().getCurrentRoute().isReader()) readerController.saveCurrentAnchor();
             readerController.setResumed(false);

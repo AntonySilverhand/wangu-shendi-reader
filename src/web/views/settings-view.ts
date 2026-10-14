@@ -307,7 +307,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(
     sheetSection(
       '本地文件',
-      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '书源不可用时，可导入 TXT 继续阅读。' }),
+      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '导入的 TXT 会作为本地书加入书架；书源不可用时也可继续阅读。' }),
       el('div', { class: 'row-actions' }, importTxtBtn, exportTxtBtn, txtInput),
     ),
   );
@@ -325,7 +325,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
     const json = deps.onExportPersonal();
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `万古神帝-阅读数据-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = el('a', { href: url, download: `阅读数据-${new Date().toISOString().slice(0, 10)}.json` });
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -512,7 +512,7 @@ export function openAboutSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(
     sheetSection(
       '关于',
-      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: `${deps.bookTitle} · 个人阅读器` }),
+      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: `万书阅读器 · 当前：${deps.bookTitle}` }),
       el('p', {
         class: 'loading-note',
         style: { textAlign: 'left' },

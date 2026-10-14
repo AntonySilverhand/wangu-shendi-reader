@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { handleApi, MemoryApiCache } from '../src/shared/api.ts';
 import type { ChapterResult, TocRangeResult } from '../src/shared/source.ts';
+import { resetSearchGate } from '../src/shared/source.ts';
+import type { SearchResponse } from '../src/shared/api.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) => readFileSync(join(here, 'fixtures', name), 'utf8');
@@ -179,5 +181,76 @@ describe('API 路由（同构 handler）', () => {
     await handleApi(new URL('https://x/api/chapter?id=999'), context);
     expect(after1).toBeGreaterThan(0);
     expect(calls).toBe(after1);
+  });
+  it('多书：book 参数选择书号，目录第 1 页附带书籍信息，单页书 totalPages=1', async () => {
+    const fetcher = fakeFetcher({
+      '/book/230580/': fixture('book-230580-p1.html'),
+      '/book/230580/1.html': fixture('book-230580-p2.html'),
+    });
+    const res = await handleApi(new URL('https://x/api/toc?book=230580&from=1&to=2'), { ...ctx(), fetcher });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TocRangeResult;
+    expect(body.totalPages).toBe(1);
+    expect(body.book).toMatchObject({ id: '230580', title: '万古神帝之万古青鹿传', author: 'Bean' });
+    expect(body.pages[0]!.entries.some((e) => e.displayTitle === '人物介绍')).toBe(true);
+  });
+
+  it('多书：章节按 book 取对应书的 URL；未给 book 时兼容预置书', async () => {
+    const seen: string[] = [];
+    const fetcher = async (input: string): Promise<Response> => {
+      const path = new URL(input).pathname;
+      seen.push(path);
+      const html = path === '/book/230580_89420896.html' ? fixture('chapter-230580-89420896-vip.html') : undefined;
+      return new Response(html ?? 'nf', { status: html ? 200 : 404, headers: { 'content-type': 'text/html' } });
+    };
+    const res = await handleApi(new URL('https://x/api/chapter?book=230580&id=89420896'), { ...ctx(), fetcher, retries: 0 });
+    const body = (await res.json()) as ChapterResult;
+    expect(body.restricted).toBe(true);
+    expect(body.paragraphs).toHaveLength(5);
+    expect(seen[0]).toBe('/book/230580_89420896.html');
+    seen.length = 0;
+    await handleApi(new URL('https://x/api/chapter?id=89420896'), { ...ctx(), fetcher, retries: 0 });
+    expect(seen[0]).toBe('/book/36780_89420896.html');
+  });
+
+  it('多书：非法书号返回 400，不访问上游', async () => {
+    let calls = 0;
+    const fetcher = async (): Promise<Response> => {
+      calls++;
+      return new Response('', { status: 404 });
+    };
+    for (const q of ['book=abc&id=1', 'book=0&id=1', 'book=1234567890&id=1', 'book=1%2F..%2F2&id=1']) {
+      const res = await handleApi(new URL(`https://x/api/chapter?${q}`), { ...ctx(), fetcher });
+      expect(res.status).toBe(400);
+    }
+    const toc = await handleApi(new URL('https://x/api/toc?book=x&from=1&to=1'), { ...ctx(), fetcher });
+    expect(toc.status).toBe(400);
+    expect(calls).toBe(0);
+  });
+
+  it('搜索：POST 到 /search.html、结果缓存、非法搜索词 400', async () => {
+    resetSearchGate();
+    const calls: { url: string; method?: string; body?: unknown }[] = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      return new Response(fixture('search-desktop.html'), { status: 200, headers: { 'content-type': 'text/html' } });
+    };
+    const context = { ...ctx(), fetcher, retries: 0 };
+    const res = await handleApi(new URL(`https://x/api/search?q=${encodeURIComponent('斗破苍穹')}`), context);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SearchResponse;
+    expect(body.query).toBe('斗破苍穹');
+    expect(body.results.find((b) => b.id === '104429')?.author).toBe('九支书竹');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe('POST');
+    expect(new URL(calls[0]!.url).pathname).toBe('/search.html');
+    const again = await handleApi(new URL(`https://x/api/search?q=${encodeURIComponent(' 斗破苍穹 ')}`), context);
+    expect(again.headers.get('x-reader-cache')).toBe('hit');
+    expect(calls).toHaveLength(1);
+    for (const q of ['', '%20%20', 'a'.repeat(31)]) {
+      const bad = await handleApi(new URL(`https://x/api/search?q=${q}`), context);
+      expect(bad.status).toBe(400);
+    }
+    resetSearchGate();
   });
 });

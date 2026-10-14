@@ -3,10 +3,15 @@
  * 仅暴露受限路由，不接受任意 URL。
  */
 import {
-  BOOK,
+  DEFAULT_BOOK,
+  SITE,
   fetchChapter,
   fetchTocRange,
+  isValidBookId,
+  normalizeSearchQuery,
+  searchBooks,
   SourceError,
+  type BookSummary,
   type ChapterResult,
   type FetchLike,
   type TocRangeResult,
@@ -36,11 +41,12 @@ export const CACHE_TTL = {
   chapter: 30 * 24 * 3600,
   chapterPartial: 120,
   toc: 6 * 3600,
+  search: 30 * 60,
   health: 0,
 } as const;
 
 const MAX_TOC_RANGE = 6;
-const MAX_TOC_PAGE = 80;
+const MAX_TOC_PAGE = 999;
 
 interface ApiErrorBody {
   error: { code: string; message: string; retryable: boolean };
@@ -126,12 +132,29 @@ export async function handleApi(
       case '/api/health': {
         return json({
           ok: true,
-          book: { id: BOOK.id, title: BOOK.title, author: BOOK.author },
+          site: { origin: SITE.origin, name: SITE.name },
+          book: { id: DEFAULT_BOOK.id, title: DEFAULT_BOOK.title, author: DEFAULT_BOOK.author },
           now: (ctx.now ?? Date.now)(),
         });
       }
 
+      case '/api/search': {
+        const q = normalizeSearchQuery(url.searchParams.get('q') ?? '');
+        if (q === null) {
+          return json(
+            { error: { code: 'bad_query', message: '搜索词无效（1–30 字）', retryable: false } },
+            { status: 400 },
+          );
+        }
+        return await cachedJson(ctx, `search:v1:${q}`, CACHE_TTL.search, async () => {
+          const results = await searchBooks(q, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries });
+          return { query: q, results } satisfies SearchResponse;
+        });
+      }
+
       case '/api/toc': {
+        const book = bookParam(url.searchParams);
+        if (book === null) return badBook();
         const from = parseIntParam(url.searchParams, 'from', 1, MAX_TOC_PAGE);
         const to = parseIntParam(url.searchParams, 'to', 1, MAX_TOC_PAGE);
         if (from === null || to === null || to < from || to - from + 1 > MAX_TOC_RANGE) {
@@ -146,12 +169,15 @@ export async function handleApi(
             { status: 400 },
           );
         }
-        return await cachedJson(ctx, `toc:v2:${BOOK.id}:${from}-${to}`, CACHE_TTL.toc, () =>
-          fetchTocRange(from, to, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries }),
+        // v3：多书（book 参数）、totalPages 未知时为 0、范围含第 1 页时附带书籍信息
+        return await cachedJson(ctx, `toc:v3:${book}:${from}-${to}`, CACHE_TTL.toc, () =>
+          fetchTocRange(book, from, to, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries }),
         );
       }
 
       case '/api/chapter': {
+        const book = bookParam(url.searchParams);
+        if (book === null) return badBook();
         const id = url.searchParams.get('id') ?? '';
         if (!/^\d{1,12}$/.test(id)) {
           return json(
@@ -162,14 +188,14 @@ export async function handleApi(
         {
           // v4：分页发现改为 frontier + 终章证据；旧版本可能把“未发现分页”
           // 的残缺一章缓存成 complete:true 30 天，必须绕过。
-          const key = `chapter:v4:${BOOK.id}:${id}`;
+          const key = `chapter:v4:${book}:${id}`;
           const hit = await ctx.cache.get(key);
           if (hit) {
             return json(JSON.parse(hit.body), {
               headers: { 'x-reader-cache': 'hit', 'cache-control': 'no-store' },
             });
           }
-          const data = await fetchChapter(id, { fetcher: ctx.fetcher, retries: ctx.retries, signal: ctx.signal, highPriority: url.searchParams.get('background') !== '1' });
+          const data = await fetchChapter(book, id, { fetcher: ctx.fetcher, retries: ctx.retries, signal: ctx.signal, highPriority: url.searchParams.get('background') !== '1' });
           const ttl = data.complete ? CACHE_TTL.chapter : CACHE_TTL.chapterPartial;
           await ctx.cache.put(key, { status: 200, body: JSON.stringify(data) }, ttl);
           return json(data, {
@@ -189,9 +215,29 @@ export async function handleApi(
   }
 }
 
+export interface SearchResponse {
+  query: string;
+  results: BookSummary[];
+}
+
 export interface ApiResultTypes {
   chapter: ChapterResult;
   toc: TocRangeResult;
+  search: SearchResponse;
+}
+
+/** book 参数可省略（兼容旧客户端，默认预置书）；非法时返回 null */
+function bookParam(params: URLSearchParams): string | null {
+  const raw = params.get('book');
+  if (raw === null || raw === '') return DEFAULT_BOOK.id;
+  return isValidBookId(raw) ? raw : null;
+}
+
+function badBook(): Response {
+  return json(
+    { error: { code: 'bad_book', message: '书号无效', retryable: false } },
+    { status: 400 },
+  );
 }
 
 /* ------------------------------------------------------------------ */

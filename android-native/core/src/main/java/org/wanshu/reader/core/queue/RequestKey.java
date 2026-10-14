@@ -24,6 +24,20 @@ public class RequestKey {
         return new RequestKey("toc:" + bookId + ":" + sourcePageIndex);
     }
 
+    /** One upstream search per distinct normalized query. */
+    public static RequestKey search(String normalizedQuery) {
+        return new RequestKey("search:" + normalizedQuery);
+    }
+
+    /** Detail page metadata; kept apart from tocPage so the shared result types never mix. */
+    public static RequestKey bookInfo(String bookId) {
+        return new RequestKey("info:" + bookId);
+    }
+
+    public static RequestKey cover(String bookId) {
+        return new RequestKey("cover:" + bookId);
+    }
+
     public static RequestKey of(String customKey) {
         return new RequestKey(customKey);
     }

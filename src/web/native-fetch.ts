@@ -6,7 +6,9 @@ export function installNativeFetch(): void {
   const cache = new MemoryApiCache(500);
   const realFetch = window.fetch.bind(window);
   const nativeFetcher: FetchLike = async (url, init) => {
-    const res = await realFetch(`/native/source?url=${encodeURIComponent(url)}`, { signal: init?.signal });
+    // 站内搜索为 POST：拦截层拿不到请求体，表单经 query 传给原生，由原生发 POST
+    const form = init?.method === 'POST' && typeof init.body === 'string' ? `&form=${encodeURIComponent(init.body)}` : '';
+    const res = await realFetch(`/native/source?url=${encodeURIComponent(url)}${form}`, { signal: init?.signal });
     const out = new Response(await res.text(), {
       status: res.status,
       headers: { 'content-type': 'text/html; charset=utf-8' },

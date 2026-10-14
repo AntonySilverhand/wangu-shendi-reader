@@ -13,6 +13,7 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
     private List<TextBlock> blocks = new ArrayList<TextBlock>();
     private boolean hasPrev = false;
     private boolean hasNext = false;
+    private boolean restricted = false;
 
     private ThemeColors colors;
     private float fontSizeSp = 18f;
@@ -38,6 +39,17 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             boolean hasPrev,
             boolean hasNext
     ) {
+        setData(title, blocks, hasPrev, hasNext, false);
+    }
+
+    public void setData(
+            String title,
+            List<TextBlock> blocks,
+            boolean hasPrev,
+            boolean hasNext,
+            boolean restricted
+    ) {
+        this.restricted = restricted;
         this.chapterTitle = title != null ? title : "";
         this.blocks = blocks != null ? blocks : new ArrayList<TextBlock>();
         this.hasPrev = hasPrev;
@@ -97,7 +109,7 @@ public class ReaderBlockAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
     @Override
     public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
         if (holder instanceof HeaderViewHolder) {
-            ((HeaderViewHolder) holder).bind(chapterTitle, colors);
+            ((HeaderViewHolder) holder).bind(chapterTitle, restricted, colors);
         } else if (holder instanceof BlockViewHolder) {
             int blockIndex = position - 1;
             if (blockIndex >= 0 && blockIndex < blocks.size()) {

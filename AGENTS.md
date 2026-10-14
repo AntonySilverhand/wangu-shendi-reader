@@ -4,9 +4,10 @@
 
 ## 项目是什么
 
-《万古神帝》个人阅读器：手机优先、干净、可离线的中文小说阅读网站 + Android APK。
-书源是万书阁（wanshuge.org，book 36780）。前端是原生 TypeScript（无框架）+ Vite；
-后端是一份同构代码，本地跑 Node、线上跑 Cloudflare Worker。另有 Android WebView 壳。
+万书阅读器：手机优先、干净、可离线的中文小说阅读网站 + Android APK。
+书源是万书阁（wanshuge.org）：可在书源中搜索并阅读任意书，预置书为《万古神帝》（book 36780）。
+前端是原生 TypeScript（无框架）+ Vite；后端是一份同构代码，本地跑 Node、线上跑 Cloudflare Worker。
+另有 Android WebView 壳（`android/`）与开发中的纯原生 App（`android-native/`，见其 AGENTS.md）。
 
 ## 常用命令
 
@@ -18,12 +19,14 @@ npm run build:android    # Android 目标构建到 dist-android/
 bash tools/verify.sh     # 构建 + 起服务 + 聚焦回归（约 1 分钟，提交前必跑）
 node test/e2e.mjs <url> 1   # E2E 第 1 段（29 项）
 node test/e2e.mjs <url> 2   # E2E 第 2 段（29 项，本环境单命令限 2 分钟故分段）
+node test/e2e.mjs <url> 3   # E2E 第 3 段（多书：搜索→详情→阅读→书架，API 由 fixture 模拟）
+bash tools/test-android-source.sh   # Android 壳书源白名单 JVM 单测（无需 SDK）
 node test/verify-delivery.mjs   # 交付验证（内容完整性/旧缓存补全/连续翻章/无轮询）
 node test/check-layout.mjs      # 宽屏形态验证（1100/1500 断点）
 npm test                 # 单元测试（vi test）
 npm run typecheck        # tsc --noEmit，必须零错误
 bash tools/reader-server.sh start|stop|restart|status 8787   # 本地生产预览
-bash android/build.sh 0.0.9    # 打 APK（产物 artifacts/wangu-reader-v0.0.9.apk）
+bash android/build.sh 0.0.17   # 打 APK（产物 artifacts/wangu-reader-v0.0.17.apk）
 gh release create vX.Y.Z artifacts/*.apk ...   # 发布
 ```
 
@@ -33,9 +36,11 @@ gh release create vX.Y.Z artifacts/*.apk ...   # 发布
 src/shared/    同构：source.ts（书源适配/解析）、api.ts（/api 路由 + 缓存接口）
 src/server/    Node：dev.ts（静态+API）、middleware.ts、file-cache.ts（磁盘缓存）、vite-plugin.ts
 src/worker/    Cloudflare Worker 入口（Cache API）
-src/web/       app.ts（编排）views/（reader/toc/settings/bookmarks/search/home）
-               store/（settings/personal/db/toc/chapter/download/txt/remote）
-android/       原生壳：MainActivity + LocalServer（本地资源服务 + 书源代理）+ build.sh
+src/web/       app.ts（编排 + 路由）cover.ts（封面）
+               views/（reader/toc/settings/bookmarks/search=章内搜索/discover=书源搜索/home=书架）
+               store/（settings/personal/library=书架/db/toc/chapter/download/txt/remote）
+android/       WebView 壳：MainActivity + AssetClient（https://reader.local 资源拦截）
+               + SourceProxy/SourceRules（受限书源代理：页面/搜索 POST/封面）+ build.sh
 test/          单元测试、真实 HTML fixtures、e2e.mjs、验证脚本
 tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 ```
@@ -48,14 +53,20 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 4. **缓存键改动必须升版本**（如 `chapter:v2:`）。服务端磁盘缓存（`.cache/api`）与客户端 IndexedDB 都可能残留旧数据；改缓存语义时同步升 `CHAPTER_CACHE_VERSION`，并让旧记录失效后**先显示缓存再后台补全**（不可阻塞阅读）。
 5. **`complete` 语义**：只有 `ChapterResult.complete === true` 才算完整；客户端把 `undefined` 当不完整处理（触发补全）。章节内容永远"宁多勿少"——补全结果更短时不要覆盖。
 6. **Service Worker 缓存必须按构建号隔离**（`reader-shell-<build>` / `reader-runtime-<build>`），激活时清理旧版本；否则旧 JS 会持续提供，造成"修了还在复现"。
-7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置）混在一起。
+7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许万书阁上由**校验过的书号/章节号**拼出的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`——三端（`source.ts`、`SourceRules.java`、原生 `UrlSafetyValidator`）保持同一白名单。
 8. **保持轻量**：不引入前端框架/网络字体；静态资源体积目标 < 150KB gzip。
+9. **书号即 bookId**：远程书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），本地书为 `local-xxx`。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。
+10. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
 
 ## 书源适配速查
 
-- 目录：`/book/36780/`（第 1 页）与 `/book/36780/{n}.html`，共 44 页；每页含置顶"新书+番外"块与页尾快捷链接，用 `classifyTocItems` 的章节号中位数过滤 + 尾部剔除。
-- 章节第 1 页 `/book/36780_{id}.html`，后续分页 `/book/36780/{id}_{n}.html`（n 从 1 起）。
-- 正文是 `document.writeln(qsbs.bb('<base64>'))`，解码后为 `<p>`；无编码时回退 `#content`。
+- 所有书同一套模板。以下 `{b}` 为书号（如 36780、104429）。
+- 目录：`/book/{b}/`（第 1 页 = 详情页，含 `og:novel:*` 书籍信息与 `og:novel:read_url` 首章）与 `/book/{b}/{n}.html`；总页数来自第 2 页的分页 `<select>`（≤100 章的书只有一个选项 → 1 页；超出末页会回环）。《万古神帝》44 页。每页含置顶"最新章节/新书+番外"块与页尾快捷链接，用 `classifyTocItems` 的章节号中位数过滤 + 尾部剔除，合并按 id（上传顺序）。
+- 章节第 1 页 `/book/{b}_{id}.html`，后续分页 `/book/{b}/{id}_{n}.html`（n 从 1 起）。
+- 正文是 `document.writeln(qsbs.bb('<base64>'))`，解码后为 `<p>`；无编码时回退 `#content`，再回退 `h2.chapter-title` 之后的裸 `<p>`。
+- 源站会员门槛：“后续内容已被隐藏，请升级VIP会员后继续阅读。”→ 标记 `restricted`、提示用户，**不绕过**。
+- 搜索：`POST /search.html`，表单 `s=<关键词>`（GET 无效）；桌面模板 `ul#novel-search li`（s1 分类/s2 书名/s3 作者/s4 最新章/s5 日期），移动 UA 模板为 `a.list`。源站约 5 秒限频（`search_time` cookie）→ `MIN_SEARCH_GAP_MS`。三端统一用桌面 UA。
+- 封面：`/img/{b}.jpg`（无封面时返回默认图）。
 - **同 chapterId 的分页链接 = 下一页；不同 chapterId = 下一章**。合并分页、按段落去重、保持顺序；后页失败时保留已取内容并标 `missingPages`（客户端提示"继续加载"）。
 - 源站有重复上传与错号：同章号优先保留有标题版本，同号不同标题都保留；番外按序号归位、同标题保留最新 id。
 - 源站偶发连接重置，属正常现象：靠重试 + 缓存消化，不要因此改成并发。
@@ -65,7 +76,7 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 - `npm run typecheck` 零错误、`npm test` 全绿。
 - 改动阅读/缓存/位置逻辑：跑 `node test/verify-delivery.mjs`。
 - 改动布局/主题/交互：跑 E2E 两段（`1` 和 `2`）或至少 `tools/verify.sh`。
-- 改动 Android 壳：确认 `bash android/build.sh <ver>` 成功，且 `aapt dump badging` 的 versionCode/Name 正确。
+- 改动 Android 壳：跑 `bash tools/test-android-source.sh`，并确认 `bash android/build.sh <ver>` 成功、`aapt dump badging` 的 versionCode/Name 正确。
 - 提交信息写清版本与修复内容；发布用 `gh release create`，APK 作为 asset。
 
 ## 数据与存储
@@ -73,6 +84,7 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 | 数据 | 位置 | 说明 |
 |---|---|---|
 | 设置/进度/书签/历史 | localStorage `reader.settings.v1` / `reader.personal.v1` | 清理正文缓存不影响；可导出/导入 |
+| 书架（远程书元数据、当前书） | localStorage `reader.library.v1` | 随个人数据导出；预置书只加入一次 |
 | 正文/目录/本地书 | IndexedDB `reader-db` (chapters/toc) | 可重新获取（本地导入书除外） |
 | 服务端缓存 | `.cache/api`（Node）/ Cache API（Worker） | 已 gitignore |
 

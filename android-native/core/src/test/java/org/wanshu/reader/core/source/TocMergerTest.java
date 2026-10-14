@@ -17,21 +17,22 @@ public class TocMergerTest {
         String html1 = FixtureHelper.readFixture("toc-page1.html");
         String html2 = FixtureHelper.readFixture("toc-page2.html");
 
-        List<TocItemRaw> raw1 = SourceParser.parseTocPageHtml(html1, 1);
-        List<TocItemRaw> raw2 = SourceParser.parseTocPageHtml(html2, 2);
+        List<TocItemRaw> raw1 = SourceParser.parseTocPageHtml("36780", html1, 1);
+        List<TocItemRaw> raw2 = SourceParser.parseTocPageHtml("36780", html2, 2);
 
         assertTrue(raw1.size() > 0);
         assertTrue(raw2.size() > 0);
 
-        Integer total1 = SourceParser.parseTocTotalPages(html1);
+        Integer total1 = SourceParser.parseTocTotalPages("36780", html1);
+        // The detail page (page 1) has no page selector: the total is unknown, never guessed.
         assertNull(total1);
 
-        Integer total2 = SourceParser.parseTocTotalPages(html2);
+        Integer total2 = SourceParser.parseTocTotalPages("36780", html2);
         assertNotNull(total2);
         assertEquals(Integer.valueOf(44), total2);
 
-        ClassifiedToc c1 = SourceParser.classifyTocItems(raw1, 1);
-        ClassifiedToc c2 = SourceParser.classifyTocItems(raw2, 2);
+        ClassifiedToc c1 = SourceParser.classifyTocItems("36780", raw1, 1);
+        ClassifiedToc c2 = SourceParser.classifyTocItems("36780", raw2, 2);
 
         List<TocEntry> merged = TocMerger.mergeTocPages(Arrays.asList(
                 combine(c1.getMain(), c1.getExtras()),

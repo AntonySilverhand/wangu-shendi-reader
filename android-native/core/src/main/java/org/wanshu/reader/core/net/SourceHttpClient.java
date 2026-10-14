@@ -3,6 +3,7 @@ package org.wanshu.reader.core.net;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -18,6 +19,12 @@ import java.util.zip.InflaterInputStream;
 import javax.net.ssl.SSLException;
 
 public class SourceHttpClient {
+
+    /** Desktop browser identity: the site serves the same page templates the parsers are written for. */
+    public static final String USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    public static final int MAX_IMAGE_BYTES = 1024 * 1024;
+    private static final int MAX_FORM_CHARS = 2048;
 
     private final HttpConnectionFactory connectionFactory;
     private final boolean allowHttpFallback;
@@ -35,19 +42,56 @@ public class SourceHttpClient {
         this(new DefaultHttpConnectionFactory(), true);
     }
 
+    /** GET a book, TOC or chapter page as text. */
     public HttpFetchResponse fetch(String urlStr, CancellationToken token) throws IOException {
+        return executeWithFallback(UrlSafetyValidator.METHOD_GET, urlStr, null, false,
+                UrlSafetyValidator.MAX_RESPONSE_BYTES, token);
+    }
+
+    /**
+     * POST a url-encoded form (the validator only allows the search endpoint). Redirects are never
+     * followed for POST; any 3xx is an error.
+     */
+    public HttpFetchResponse postForm(String urlStr, String formBody, CancellationToken token) throws IOException {
+        if (formBody == null || formBody.length() > MAX_FORM_CHARS) {
+            throw new IllegalArgumentException("form body missing or too large");
+        }
+        byte[] bytes = formBody.getBytes(StandardCharsets.UTF_8);
+        return executeWithFallback(UrlSafetyValidator.METHOD_POST, urlStr, bytes, false,
+                UrlSafetyValidator.MAX_RESPONSE_BYTES, token);
+    }
+
+    /**
+     * GET a cover image. A successful response must have an image content type and at most maxBytes;
+     * the raw bytes are available through getBodyBytes(). Non-2xx statuses are returned as they are.
+     */
+    public HttpFetchResponse fetchBytes(String urlStr, CancellationToken token, int maxBytes) throws IOException {
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("maxBytes must be positive");
+        }
+        return executeWithFallback(UrlSafetyValidator.METHOD_GET, urlStr, null, true, maxBytes, token);
+    }
+
+    private HttpFetchResponse executeWithFallback(
+            String method,
+            String urlStr,
+            byte[] formBody,
+            boolean image,
+            int maxBytes,
+            CancellationToken token
+    ) throws IOException {
         try {
-            return executeWithRedirects(urlStr, token);
+            return execute(method, urlStr, formBody, image, maxBytes, token);
         } catch (SSLException e) {
             // Plan rule: Do NOT fallback to HTTP on TLS/certificate errors!
             throw e;
         } catch (IOException e) {
             if (allowHttpFallback && urlStr != null && urlStr.startsWith("https://")) {
                 String httpUrl = "http://" + urlStr.substring("https://".length());
-                // Only fallback if httpUrl is still safe and valid
+                // Only fallback if httpUrl is still safe and valid; the retry carries the same method and body.
                 try {
-                    UrlSafetyValidator.validateUrl(httpUrl);
-                    return executeWithRedirects(httpUrl, token);
+                    validate(method, httpUrl, image);
+                    return execute(method, httpUrl, formBody, image, maxBytes, token);
                 } catch (Exception ignored) {
                     // Fallback failed or forbidden, throw original exception
                     throw e;
@@ -57,33 +101,76 @@ public class SourceHttpClient {
         }
     }
 
-    private HttpFetchResponse executeWithRedirects(String initialUrl, CancellationToken token) throws IOException {
+    private static void validate(String method, String url, boolean image) {
+        if (image) {
+            UrlSafetyValidator.validateImageUrl(url);
+        } else {
+            UrlSafetyValidator.validateUrl(url, method);
+        }
+    }
+
+    private static boolean isRedirect(int code) {
+        return code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
+    }
+
+    private HttpFetchResponse execute(
+            String method,
+            String initialUrl,
+            byte[] formBody,
+            boolean image,
+            int maxBytes,
+            CancellationToken token
+    ) throws IOException {
         String currentUrl = initialUrl;
         int redirectCount = 0;
+        boolean post = UrlSafetyValidator.METHOD_POST.equals(method);
 
         while (true) {
             if (token != null && token.isCancelled()) {
                 throw new CancellationException("Request cancelled before connecting: " + currentUrl);
             }
 
-            UrlSafetyValidator.validateUrl(currentUrl);
+            validate(method, currentUrl, image);
 
             URL url = new URL(currentUrl);
             HttpURLConnection conn = connectionFactory.openConnection(url);
             conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(UrlSafetyValidator.CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(UrlSafetyValidator.READ_TIMEOUT_MS);
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
-            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-            conn.setRequestProperty("Accept-Encoding", "gzip, deflate");
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
+            if (image) {
+                conn.setRequestProperty("Accept", "image/*");
+            } else {
+                conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+                conn.setRequestProperty("Accept-Encoding", "gzip, deflate");
+            }
 
             try {
-                conn.connect();
+                if (post) {
+                    conn.setRequestMethod(UrlSafetyValidator.METHOD_POST);
+                    conn.setDoOutput(true);
+                    conn.setFixedLengthStreamingMode(formBody.length);
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    conn.connect();
+                    OutputStream out = conn.getOutputStream();
+                    try {
+                        out.write(formBody);
+                        out.flush();
+                    } finally {
+                        out.close();
+                    }
+                } else {
+                    conn.connect();
+                }
 
                 int code = conn.getResponseCode();
 
                 // Check redirects
-                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                if (isRedirect(code)) {
+                    if (post) {
+                        throw new IOException("Unexpected redirect (HTTP " + code + ") on " + currentUrl);
+                    }
                     redirectCount++;
                     if (redirectCount > UrlSafetyValidator.MAX_REDIRECTS) {
                         throw new IOException("Too many redirects: " + redirectCount);
@@ -103,6 +190,23 @@ public class SourceHttpClient {
 
                 Long retryAfter = parseRetryAfter(conn.getHeaderField("Retry-After"));
                 String contentType = conn.getHeaderField("Content-Type");
+                boolean success = code >= 200 && code < 300;
+
+                if (image && success) {
+                    if (contentType == null || !contentType.trim().toLowerCase(Locale.US).startsWith("image/")) {
+                        throw new IOException("Unexpected content type for image: " + contentType);
+                    }
+                    String declared = conn.getHeaderField("Content-Length");
+                    if (declared != null) {
+                        long declaredLength = -1L;
+                        try {
+                            declaredLength = Long.parseLong(declared.trim());
+                        } catch (NumberFormatException ignored) {}
+                        if (declaredLength > maxBytes) {
+                            throw new IOException("Response exceeded maximum limit of " + maxBytes + " bytes");
+                        }
+                    }
+                }
 
                 InputStream in = null;
                 try {
@@ -123,7 +227,10 @@ public class SourceHttpClient {
                         in = new InflaterInputStream(in);
                     }
 
-                    byte[] bodyBytes = readStreamWithLimit(in, UrlSafetyValidator.MAX_RESPONSE_BYTES, token, conn);
+                    byte[] bodyBytes = readStreamWithLimit(in, maxBytes, token, conn);
+                    if (image) {
+                        return new HttpFetchResponse(code, "", success ? bodyBytes : null, retryAfter, contentType, currentUrl);
+                    }
                     Charset charset = extractCharset(contentType);
                     String body = new String(bodyBytes, charset);
 
@@ -139,6 +246,9 @@ public class SourceHttpClient {
                 conn.disconnect();
                 if (e instanceof IOException) {
                     throw (IOException) e;
+                }
+                if (e instanceof RuntimeException) {
+                    throw (RuntimeException) e;
                 }
                 throw new IOException("HTTP fetch failed on " + currentUrl, e);
             } finally {

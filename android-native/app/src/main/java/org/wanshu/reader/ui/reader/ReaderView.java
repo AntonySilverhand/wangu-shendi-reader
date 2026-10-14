@@ -352,13 +352,17 @@ public class ReaderView extends FrameLayout {
     }
 
     public void showContent(String title, List<TextBlock> blocks, boolean hasPrev, boolean hasNext) {
+        showContent(title, blocks, hasPrev, hasNext, false);
+    }
+
+    public void showContent(String title, List<TextBlock> blocks, boolean hasPrev, boolean hasNext, boolean restricted) {
         loadingLayout.setVisibility(View.GONE);
         errorLayout.setVisibility(View.GONE);
         recyclerView.setVisibility(View.VISIBLE);
 
         pendingRestore = null;
         headerTitleView.setText(title != null ? title : "");
-        adapter.setData(title, blocks, hasPrev, hasNext);
+        adapter.setData(title, blocks, hasPrev, hasNext, restricted);
         recyclerView.scrollToPosition(0);
     }
 

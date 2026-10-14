@@ -2,26 +2,38 @@ package org.wanshu.reader.core.source;
 
 import java.net.URI;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class SourceUrls {
-    public static final String BOOK_ID = "36780";
-    /** 分节阅读第1节; local TXT books number their chapters from "1" instead. */
-    public static final String FIRST_CHAPTER_ID = "8924760";
+    /** The book that is on the shelf by default (the only one before multi-book support). */
+    public static final String DEFAULT_BOOK_ID = "36780";
     public static final String BOOK_ORIGIN = "https://wanshuge.org";
+    public static final String SEARCH_URL = BOOK_ORIGIN + "/search.html";
     public static final int MAX_CHAPTER_PAGES = 40;
-    public static final int TOC_PAGE_FALLBACK = 44;
 
     private static final Set<String> ALLOWED_HOSTS = new HashSet<String>(
             Arrays.asList("wanshuge.org", "www.wanshuge.org")
     );
 
+    private static final Pattern BOOK_ID_PATTERN = Pattern.compile("^[1-9]\\d{0,8}$");
     private static final Pattern CHAPTER_ID_PATTERN = Pattern.compile("^\\d{1,12}$");
-    private static final Pattern CHAPTER_P0_PATTERN = Pattern.compile("^/book/36780_(\\d+)\\.html$");
-    private static final Pattern CHAPTER_PN_PATTERN = Pattern.compile("^/book/36780/(\\d+)(?:_(\\d+))?\\.html$");
+
+    private static final Map<String, Pattern[]> LINK_PATTERNS = new HashMap<String, Pattern[]>();
+
+    public static boolean isValidBookId(String id) {
+        return id != null && BOOK_ID_PATTERN.matcher(id).matches();
+    }
+
+    public static void assertBookId(String id) {
+        if (!isValidBookId(id)) {
+            throw new IllegalArgumentException("invalid book id: " + id);
+        }
+    }
 
     public static void assertChapterId(String id) {
         if (id == null || !CHAPTER_ID_PATTERN.matcher(id).matches()) {
@@ -29,37 +41,58 @@ public class SourceUrls {
         }
     }
 
-    public static String tocPath(int page) {
+    /** Cover image URL; the source serves a default picture for books without a cover. */
+    public static String coverUrl(String bookId) {
+        assertBookId(bookId);
+        return BOOK_ORIGIN + "/img/" + bookId + ".jpg";
+    }
+
+    public static String tocPath(String bookId, int page) {
+        assertBookId(bookId);
         if (page < 1) {
             throw new IllegalArgumentException("bad toc page: " + page);
         }
         if (page == 1) {
-            return "/book/" + BOOK_ID + "/";
+            return "/book/" + bookId + "/";
         }
-        return "/book/" + BOOK_ID + "/" + (page - 1) + ".html";
+        return "/book/" + bookId + "/" + (page - 1) + ".html";
     }
 
-    public static String chapterPath(String id, int pageIndex) {
+    public static String chapterPath(String bookId, String id, int pageIndex) {
+        assertBookId(bookId);
         assertChapterId(id);
         if (pageIndex < 0 || pageIndex >= MAX_CHAPTER_PAGES) {
             throw new IllegalArgumentException("bad chapter page index: " + pageIndex);
         }
         if (pageIndex == 0) {
-            return "/book/" + BOOK_ID + "_" + id + ".html";
+            return "/book/" + bookId + "_" + id + ".html";
         }
-        return "/book/" + BOOK_ID + "/" + id + "_" + pageIndex + ".html";
+        return "/book/" + bookId + "/" + id + "_" + pageIndex + ".html";
     }
 
-    public static String buildChapterUrl(String id, int pageIndex) {
-        return BOOK_ORIGIN + chapterPath(id, pageIndex);
+    public static String buildChapterUrl(String bookId, String id, int pageIndex) {
+        return BOOK_ORIGIN + chapterPath(bookId, id, pageIndex);
     }
 
-    public static String buildTocUrl(int page) {
-        return BOOK_ORIGIN + tocPath(page);
+    public static String buildTocUrl(String bookId, int page) {
+        return BOOK_ORIGIN + tocPath(bookId, page);
     }
 
-    public static ChapterLinkResult parseChapterLink(String href) {
-        if (href == null) {
+    private static synchronized Pattern[] linkPatterns(String bookId) {
+        Pattern[] cached = LINK_PATTERNS.get(bookId);
+        if (cached == null) {
+            cached = new Pattern[] {
+                    Pattern.compile("^/book/" + bookId + "_(\\d+)\\.html$"),
+                    Pattern.compile("^/book/" + bookId + "/(\\d+)(?:_(\\d+))?\\.html$")
+            };
+            LINK_PATTERNS.put(bookId, cached);
+        }
+        return cached;
+    }
+
+    /** Parses a link to a chapter of the given book; links to other books or hosts yield null. */
+    public static ChapterLinkResult parseChapterLink(String bookId, String href) {
+        if (href == null || !isValidBookId(bookId)) {
             return null;
         }
         String h = href.trim();
@@ -94,20 +127,26 @@ public class SourceUrls {
             h = h.substring(0, queryIdx);
         }
 
-        Matcher m0 = CHAPTER_P0_PATTERN.matcher(h);
+        Pattern[] patterns = linkPatterns(bookId);
+        Matcher m0 = patterns[0].matcher(h);
         if (m0.matches()) {
             return new ChapterLinkResult(m0.group(1), 0);
         }
 
-        Matcher mn = CHAPTER_PN_PATTERN.matcher(h);
+        Matcher mn = patterns[1].matcher(h);
         if (mn.matches()) {
             String digits = mn.group(1);
             String pageStr = mn.group(2);
             if (pageStr == null && digits.length() < 6) {
-                // TOC pagination link like /book/36780/1.html
+                // TOC pagination link like /book/{id}/1.html
                 return null;
             }
-            int pIndex = pageStr != null ? Integer.parseInt(pageStr) : 0;
+            int pIndex;
+            try {
+                pIndex = pageStr != null ? Integer.parseInt(pageStr) : 0;
+            } catch (NumberFormatException e) {
+                return null;
+            }
             return new ChapterLinkResult(digits, pIndex);
         }
 

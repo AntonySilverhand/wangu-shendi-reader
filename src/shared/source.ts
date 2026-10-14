@@ -1,22 +1,25 @@
 /**
- * 书源适配层（万书阁 wanshuge.org / 《万古神帝》book 36780）。
+ * 书源适配层（万书阁 wanshuge.org，任意书号；默认书《万古神帝》book 36780）。
  *
  * 本模块是纯函数 + 可注入 fetch 的同构代码，同时运行于：
  *   - Cloudflare Worker（生产）
  *   - Node dev server（本地开发/自托管）
  *   - 单元测试（传入假 fetch 与本地 HTML fixture）
  *
- * 只做三件事：构建受限的书源 URL、解析 HTML、合并分页。所有网络请求都限定在
- * BOOK.origin + BOOK.id 范围内，调用方无法传入任意 URL（见 buildChapterUrl/tocPath）。
+ * 只做几件事：构建受限的书源 URL、解析 HTML、合并分页、站内搜索。所有网络请求都由
+ * SITE.origin + 校验过的书号/章节号拼出，调用方无法传入任意 URL（见 buildChapterUrl/tocPath）。
  */
 
-export const BOOK = {
+export const SITE = {
+  origin: 'https://wanshuge.org',
+  name: '万书阁',
+} as const;
+
+/** 预置书（升级前唯一的书；书号不变以保留旧数据） */
+export const DEFAULT_BOOK = {
   id: '36780',
   title: '万古神帝',
   author: '飞天鱼',
-  origin: 'https://wanshuge.org',
-  /** 源站目录页的“上一页/下一页”数量会变化，这里只作为兜底提示 */
-  tocPageFallback: 44,
 } as const;
 
 export const ALLOWED_HOSTS = new Set(['wanshuge.org', 'www.wanshuge.org']);
@@ -29,6 +32,9 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 export const MAX_RETRIES = 3;
 /** 源站对突发并发很敏感（会直接重置连接），所有上游请求串行并保持最小间隔 */
 export const MIN_REQUEST_GAP_MS = 160;
+/** 源站搜索自带约 5 秒的限频（search_time cookie），上游搜索之间至少间隔这么久 */
+export const MIN_SEARCH_GAP_MS = 5000;
+export const MAX_SEARCH_RESULTS = 50;
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -67,6 +73,33 @@ export interface ChapterResult {
   complete: boolean;
   /** 未取到的分页序号（0 起） */
   missingPages: number[];
+  /** 源站对本章设了会员门槛，只公开了部分内容（不绕过） */
+  restricted?: boolean;
+}
+
+/** 书籍信息（目录第 1 页 = 详情页的 og meta） */
+export interface BookInfo {
+  id: string;
+  title: string;
+  author: string;
+  category?: string;
+  status?: string;
+  intro?: string;
+  latestChapter?: string;
+  updatedAt?: string;
+  /** 首章 id（og:novel:read_url） */
+  firstChapterId?: string;
+}
+
+/** 搜索结果条目 */
+export interface BookSummary {
+  id: string;
+  title: string;
+  author?: string;
+  category?: string;
+  latestChapter?: string;
+  updated?: string;
+  intro?: string;
 }
 
 export interface RawChapterPage {
@@ -82,33 +115,55 @@ export interface RawChapterPage {
   sameChapterPages: number[];
   /** 页面自报的分页序号（lastread.set 参数 / 标题“第N页”，0 起）；无法识别为 null */
   declaredPageIndex: number | null;
+  /** 页面含源站会员门槛提示 */
+  restricted: boolean;
 }
 
 /* ------------------------------------------------------------------ */
-/* URL building (受限：只允许 BOOK 范围内的路径)                        */
+/* URL building (受限：只允许校验过的书号/章节号拼出的路径)             */
 /* ------------------------------------------------------------------ */
 
-export function tocPath(page: number): string {
+const BOOK_ID_RE = /^[1-9]\d{0,8}$/;
+
+export function isValidBookId(id: unknown): id is string {
+  return typeof id === 'string' && BOOK_ID_RE.test(id);
+}
+
+export function assertBookId(id: string): void {
+  if (!isValidBookId(id)) throw new Error('invalid book id');
+}
+
+export function tocPath(bookId: string, page: number): string {
+  assertBookId(bookId);
   if (!Number.isInteger(page) || page < 1) throw new Error('bad toc page');
-  if (page === 1) return `/book/${BOOK.id}/`;
-  return `/book/${BOOK.id}/${page - 1}.html`;
+  if (page === 1) return `/book/${bookId}/`;
+  return `/book/${bookId}/${page - 1}.html`;
 }
 
-export function chapterPath(id: string, pageIndex = 0): string {
+export function chapterPath(bookId: string, id: string, pageIndex = 0): string {
+  assertBookId(bookId);
   assertChapterId(id);
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= MAX_CHAPTER_PAGES) {
     throw new Error('bad chapter page index');
   }
-  if (pageIndex === 0) return `/book/${BOOK.id}_${id}.html`;
-  return `/book/${BOOK.id}/${id}_${pageIndex}.html`;
+  if (pageIndex === 0) return `/book/${bookId}_${id}.html`;
+  return `/book/${bookId}/${id}_${pageIndex}.html`;
 }
 
-export function buildChapterUrl(id: string, pageIndex = 0): string {
-  return BOOK.origin + chapterPath(id, pageIndex);
+export function buildChapterUrl(bookId: string, id: string, pageIndex = 0): string {
+  return SITE.origin + chapterPath(bookId, id, pageIndex);
 }
 
-export function buildTocUrl(page: number): string {
-  return BOOK.origin + tocPath(page);
+export function buildTocUrl(bookId: string, page: number): string {
+  return SITE.origin + tocPath(bookId, page);
+}
+
+export const SEARCH_URL = `${SITE.origin}/search.html`;
+
+/** 封面图（源站对无封面的书返回默认图） */
+export function coverUrl(bookId: string): string {
+  assertBookId(bookId);
+  return `${SITE.origin}/img/${bookId}.jpg`;
 }
 
 export function assertChapterId(id: string): void {
@@ -176,7 +231,12 @@ const NOISE = [
   /^章节(目录|列表)$/,
   /^热门小说推荐/,
   /^阅读记录$/,
+  /^后续内容已被隐藏/,
+  /^如果您已经是VIP会员/,
 ];
+
+/** 源站会员门槛提示（检测后标记 restricted，不绕过） */
+const RESTRICTED_RE = /后续内容已被隐藏|请升级VIP会员后继续阅读/;
 
 function isNoise(text: string): boolean {
   return NOISE.some((re) => re.test(text));
@@ -202,6 +262,37 @@ export function extractEncodedParagraphs(html: string): string[] {
       continue;
     }
     const text = cleanText(decoded);
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+/**
+ * 部分书的正文直接是 h2.chapter-title 之后的裸 <p>（既无 qsbs 编码也无 #content）。
+ * 范围：标题后第一个 read_btn 结束，到下一个 read_btn / 站点推荐段（<p style=…>）之前。
+ */
+export function extractInlineParagraphs(html: string): string[] {
+  const h2 = html.search(/<h2[^>]*class="[^"]*chapter-title[^"]*"[^>]*>/i);
+  if (h2 < 0) return [];
+  let rest = html.slice(h2);
+  const firstBtn = rest.search(/<div[^>]*class="[^"]*read_btn[^"]*"/i);
+  if (firstBtn >= 0) {
+    const close = rest.indexOf('</div>', firstBtn);
+    if (close >= 0) rest = rest.slice(close + 6);
+  }
+  const ends = [
+    rest.search(/<div[^>]*class="[^"]*read_btn[^"]*"/i),
+    rest.search(/<p\s+style=/i),
+    rest.search(/<div[^>]*class="[^"]*phb_fm/i),
+  ].filter((n) => n >= 0);
+  if (ends.length > 0) rest = rest.slice(0, Math.min(...ends));
+  rest = rest.replace(/<script\b[\s\S]*?<\/script>/gi, ' ');
+  const out: string[] = [];
+  const re = /<p\b[^>]*>([\s\S]*?)<\/p\s*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(rest))) {
+    if (/<a\b/i.test(m[1]!)) continue;
+    const text = cleanText(m[1]!);
     if (text) out.push(text);
   }
   return out;
@@ -238,7 +329,8 @@ export function extractTitle(html: string): string {
       decodeEntities(stripTags(t[1]!))
         .replace(/[_\-|]\s*万书阁\s*$/u, '')
         .replace(/\s*第\d+页\s*$/u, '')
-        .replace(/\(飞天鱼\)/g, '')
+        // 源站标题形如“章节名(作者)”或缺左括号的“章节名作者)”，作者部分无法可靠切分时只去掉括号段
+        .replace(/[(（][^()（）]{1,20}[)）]\s*$/u, '')
         .trim(),
     );
   }
@@ -296,10 +388,11 @@ export interface ParsedChapterLink {
 
 /**
  * 解析任意指向本书章节页面的链接：相对/绝对/协议相对、单双引号、query/hash。
- * 只接受 wanshuge.org / www.wanshuge.org 上的 book 36780 路径，
- * 其它一律返回 null（安全边界不变，后端仍不是任意 URL 代理）。
+ * 只接受 wanshuge.org / www.wanshuge.org 上的本书（bookId）路径，
+ * 其它（含站内其他书的推荐链接）一律返回 null（安全边界不变，后端仍不是任意 URL 代理）。
  */
-export function parseChapterLink(href: string): ParsedChapterLink | null {
+export function parseChapterLink(bookId: string, href: string): ParsedChapterLink | null {
+  if (!isValidBookId(bookId)) return null;
   let h = (href ?? '').trim();
   if (!h) return null;
   const hash = h.indexOf('#');
@@ -316,12 +409,12 @@ export function parseChapterLink(href: string): ParsedChapterLink | null {
   const q = h.indexOf('?');
   if (q >= 0) h = h.slice(0, q);
 
-  let m = h.match(new RegExp(`^/book/${BOOK.id}_(\\d+)\\.html$`));
+  let m = h.match(new RegExp(`^/book/${bookId}_(\\d+)\\.html$`));
   if (m) return { id: m[1]!, pageIndex: 0 };
-  m = h.match(new RegExp(`^/book/${BOOK.id}/(\\d+)(?:_(\\d+))?\\.html$`));
+  m = h.match(new RegExp(`^/book/${bookId}/(\\d+)(?:_(\\d+))?\\.html$`));
   if (m) {
     const digits = m[1]!;
-    // /book/36780/{n}.html 同时是“目录第 n+1 页”（n≤43，一两位）与旧版章节首页形式。
+    // /book/{bookId}/{n}.html 同时是“目录第 n+1 页”（页码最多几百）与旧版章节首页形式。
     // 章节 id 在本源站均为 7 位以上；按位数区分，避免把目录页误认成章节。
     if (!m[2] && digits.length < 6) return null;
     return { id: digits, pageIndex: m[2] ? parseInt(m[2], 10) : 0 };
@@ -360,6 +453,7 @@ export function extractDeclaredPageIndex(html: string): number | null {
  *  - 不同 id 且 pageIndex 0 = 真正相邻章节（文字仅用于区分方向，不用于认定语义）
  */
 export function parseChapterPage(
+  bookId: string,
   html: string,
   expectedId: string,
   pageIndex: number,
@@ -367,6 +461,8 @@ export function parseChapterPage(
   const title = extractTitle(html);
   let paragraphs = extractEncodedParagraphs(html);
   if (paragraphs.length === 0) paragraphs = extractPlainParagraphs(html);
+  if (paragraphs.length === 0) paragraphs = extractInlineParagraphs(html);
+  const restricted = paragraphs.some((p) => RESTRICTED_RE.test(p));
 
   const cleaned: string[] = [];
   for (const p of paragraphs) {
@@ -383,7 +479,7 @@ export function parseChapterPage(
   let otherFirstId: string | null = null;
 
   for (const link of extractContentAnchors(html)) {
-    const parsed = parseChapterLink(link.href);
+    const parsed = parseChapterLink(bookId, link.href);
     if (!parsed) continue;
     if (parsed.id === expectedId) {
       // 同 chapter id = 同章分页，文字说什么都不改变这一点
@@ -417,6 +513,7 @@ export function parseChapterPage(
     nextPageIndex,
     sameChapterPages: sortedSame,
     declaredPageIndex: extractDeclaredPageIndex(html),
+    restricted,
   };
 }
 
@@ -424,14 +521,14 @@ export function parseChapterPage(
 /* TOC parsing                                                         */
 /* ------------------------------------------------------------------ */
 
-function extractListItems(block: string): TocItemRaw[] {
+function extractListItems(bookId: string, block: string): TocItemRaw[] {
   const items: TocItemRaw[] = [];
   const re =
     /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(block))) {
     const href = m[1]!;
-    const parsed = parseChapterLink(href);
+    const parsed = parseChapterLink(bookId, href);
     if (!parsed || parsed.pageIndex !== 0) continue;
     const title = decodeEntities(stripTags(m[2]!)).replace(/\s+/g, ' ').trim();
     if (!title) continue;
@@ -448,18 +545,18 @@ function extractListItems(block: string): TocItemRaw[] {
  *  - 第 2+ 页主列表是 ul.section-list（头部夹带置顶区块，尾部夹带“从第一章开始”的快捷链接）
  * 解析阶段不做过滤，分类与去重见 classifyTocItems/mergeTocPages。
  */
-export function parseTocPageHtml(html: string, _page: number): TocItemRaw[] {
+export function parseTocPageHtml(bookId: string, html: string, _page: number): TocItemRaw[] {
   const items: TocItemRaw[] = [];
   const re =
     /<ul[^>]+class="[^"]*\b(?:ph_list|section-list)\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
-    items.push(...extractListItems(m[1]!));
+    items.push(...extractListItems(bookId, m[1]!));
   }
   if (items.length > 0) return items;
 
   // 兜底：整页扫描
-  return extractListItems(html);
+  return extractListItems(bookId, html);
 }
 
 interface ClassifiedToc {
@@ -605,17 +702,20 @@ export function mergeTocPages(pages: TocItemRaw[][]): TocEntry[] {
   }));
 }
 
-export function parseTocTotalPages(html: string): number | null {
-  const m = html.match(new RegExp(`/book/${BOOK.id}/(\\d+)\\.html"[^>]*>第[\\d\\-]+章`));
+export function parseTocTotalPages(bookId: string, html: string): number | null {
+  assertBookId(bookId);
+  const m = html.match(new RegExp(`/book/${bookId}/(\\d+)\\.html"[^>]*>第[\\d\\-]+章`));
   const select = html.match(/<select[\s\S]*?<\/select>/i);
   if (select) {
-    const options = select[0].match(new RegExp(`/book/${BOOK.id}/(\\d+)\\.html`, 'g'));
+    const options = select[0].match(new RegExp(`/book/${bookId}/(\\d+)\\.html`, 'g'));
     if (options && options.length > 0) {
       const max = Math.max(
         ...options.map((o) => parseInt(o.match(/\/(\d+)\.html/)![1]!, 10)),
       );
       return max + 1;
     }
+    // 分页下拉只有“第1-100章”一项（≤100 章的书）：只有 1 页
+    if (new RegExp(`/book/${bookId}/["']`).test(select[0])) return 1;
   }
   if (m) return parseInt(m[1]!, 10) + 1;
   return null;
@@ -719,9 +819,12 @@ export interface TocRangePage {
 export interface TocRangeResult {
   from: number;
   to: number;
+  /** 0 = 本次未能确定总页数（客户端保留原值） */
   totalPages: number;
   pages: TocRangePage[];
   failedPages: number[];
+  /** 范围包含第 1 页（详情页）时附带书籍信息 */
+  book?: BookInfo;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -743,10 +846,12 @@ async function mapWithConcurrency<T, R>(
 }
 
 export async function fetchTocRange(
+  bookId: string,
   from: number,
   to: number,
   opts: FetchOptions = {},
 ): Promise<TocRangeResult> {
+  assertBookId(bookId);
   if (from < 1 || to < from) throw new Error('bad toc range');
   const pages: number[] = [];
   for (let p = from; p <= to; p++) pages.push(p);
@@ -754,15 +859,16 @@ export async function fetchTocRange(
   const fetched = await mapWithConcurrency(pages, 2, async (page) => {
     if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
     try {
-      const { html } = await fetchSourceHtml(buildTocUrl(page), { ...opts, highPriority: false });
-      const classified = classifyTocItems(parseTocPageHtml(html, page), page);
+      const { html } = await fetchSourceHtml(buildTocUrl(bookId, page), { ...opts, highPriority: false });
+      const classified = classifyTocItems(parseTocPageHtml(bookId, html, page), page);
       return {
         page,
         entries: [...classified.main, ...classified.extras],
-        totalPages: parseTocTotalPages(html),
+        totalPages: parseTocTotalPages(bookId, html),
+        book: page === 1 ? parseBookInfo(bookId, html) : null,
       };
     } catch {
-      return { page, entries: null, totalPages: null };
+      return { page, entries: null, totalPages: null, book: null };
     }
   });
 
@@ -772,16 +878,18 @@ export async function fetchTocRange(
     totalPages: number | null;
   }[];
   const failedPages = fetched.filter((f) => f.entries === null).map((f) => f.page);
-  const totalPages =
-    fetched.find((f) => f.totalPages !== null)?.totalPages ?? BOOK.tocPageFallback;
+  const totalPages = fetched.find((f) => f.totalPages !== null)?.totalPages ?? 0;
+  const book = fetched.find((f) => f.book)?.book ?? undefined;
 
-  return {
+  const result: TocRangeResult = {
     from,
     to,
     totalPages,
     pages: ok.map((f) => ({ page: f.page, entries: f.entries })),
     failedPages,
   };
+  if (book) result.book = book;
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -876,9 +984,15 @@ export interface FetchOptions {
   retries?: number;
   signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
+  /** 非空时以 POST application/x-www-form-urlencoded 发送（仅用于站内搜索） */
+  form?: string;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** 三端（Worker/Node/Android）统一用桌面 UA，拿到同一套页面模板 */
+export const SOURCE_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 export function fetchSourceHtml(url: string, opts: FetchOptions = {}): Promise<FetchTextResult> {
   return enqueueUpstream(() => fetchSourceHtmlDirect(url, opts), opts.highPriority !== false);
@@ -916,17 +1030,19 @@ async function fetchSourceHtmlDirect(
       const onAbort = () => controller.abort();
       opts.signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        const res = await fetcher(candidate, {
-          signal: controller.signal,
-          redirect: 'follow',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Cache-Control': 'no-cache',
-          },
-        });
+        const headers: Record<string, string> = {
+          'User-Agent': SOURCE_USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          'Cache-Control': 'no-cache',
+        };
+        const init: RequestInit = { signal: controller.signal, redirect: 'follow', headers };
+        if (opts.form !== undefined) {
+          init.method = 'POST';
+          init.body = opts.form;
+          headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        }
+        const res = await fetcher(candidate, init);
 
         if (res.status !== 200) {
           throw new SourceError(`upstream HTTP ${res.status}`, 'http', res.status >= 500, res.status);
@@ -973,17 +1089,14 @@ async function fetchSourceHtmlDirect(
   throw lastError ?? new SourceError('fetch failed', 'network', true);
 }
 
-export function parseTotalPagesFromTocHtml(html: string): number | null {
-  return parseTocTotalPages(html);
-}
-
 export async function fetchTocPage(
+  bookId: string,
   page: number,
   opts: FetchOptions = {},
 ): Promise<TocPageResult> {
-  const { html } = await fetchSourceHtml(buildTocUrl(page), opts);
-  const raw = parseTocPageHtml(html, page);
-  const totalPages = parseTocTotalPages(html) ?? BOOK.tocPageFallback;
+  const { html } = await fetchSourceHtml(buildTocUrl(bookId, page), opts);
+  const raw = parseTocPageHtml(bookId, html, page);
+  const totalPages = parseTocTotalPages(bookId, html) ?? 0;
   return { page, totalPages, entries: mergeTocPages([raw]) };
 }
 
@@ -1009,9 +1122,11 @@ type PageFetchOutcome =
  *    “没发现分页”或“missingPages 为空”而置 true。
  */
 export async function fetchChapter(
+  bookId: string,
   id: string,
   opts: FetchOptions = {},
 ): Promise<ChapterResult> {
+  assertBookId(bookId);
   assertChapterId(id);
   const fetched = new Map<number, RawChapterPage>();
   const failed = new Set<number>();
@@ -1026,8 +1141,8 @@ export async function fetchChapter(
 
   const fetchOne = async (pageIndex: number): Promise<PageFetchOutcome> => {
     try {
-      const res = await fetchSourceHtml(buildChapterUrl(id, pageIndex), opts);
-      return { kind: 'ok', page: parseChapterPage(res.html, id, pageIndex) };
+      const res = await fetchSourceHtml(buildChapterUrl(bookId, id, pageIndex), opts);
+      return { kind: 'ok', page: parseChapterPage(bookId, res.html, id, pageIndex) };
     } catch (err) {
       const sourceErr =
         err instanceof SourceError
@@ -1177,7 +1292,7 @@ export async function fetchChapter(
   const last = sorted[sorted.length - 1]!;
   const title = sorted.map((p) => p.title).find((t) => !/第\d+页/.test(t)) ?? first.title;
 
-  return {
+  const result: ChapterResult = {
     id,
     title,
     paragraphs,
@@ -1188,4 +1303,192 @@ export async function fetchChapter(
     complete: terminal && missing.size === 0,
     missingPages: [...missing].sort((a, b) => a - b),
   };
+  if (sorted.some((p) => p.restricted)) result.restricted = true;
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* 书籍信息（详情页 og meta）                                           */
+/* ------------------------------------------------------------------ */
+
+function metaContent(html: string, property: string): string | undefined {
+  const esc = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m =
+    html.match(new RegExp(`<meta[^>]+property=["']${esc}["'][^>]*content=["']([^"']*)["']`, 'i')) ??
+    html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*property=["']${esc}["']`, 'i'));
+  if (!m) return undefined;
+  const v = cleanText(m[1]!).replace(/\n+/g, ' ').trim();
+  return v || undefined;
+}
+
+/** 去掉简介里的站点套话（“三秒记住本站…”“是由作者：X所著，万书阁免费提供…”） */
+export function cleanIntro(raw: string, title = ''): string {
+  let t = raw
+    .replace(/三秒记住本站[\s\S]*$/u, '')
+    .replace(/[^。！？\n]*万书阁免费提供[^。！？\n]*[。！？]?/gu, '')
+    .replace(/如果您喜欢[^，,]*[，,]别忘记分享给朋友[.。…]*/gu, '')
+    .replace(/^关于[^：:]{1,40}[：:]/u, '')
+    .trim();
+  if (title && t === title) t = '';
+  return t;
+}
+
+export function parseBookInfo(bookId: string, html: string): BookInfo | null {
+  assertBookId(bookId);
+  const title = metaContent(html, 'og:novel:book_name') ?? metaContent(html, 'og:title');
+  if (!title) return null;
+  const info: BookInfo = {
+    id: bookId,
+    title,
+    author: metaContent(html, 'og:novel:author') ?? '',
+  };
+  const category = metaContent(html, 'og:novel:category');
+  const status = metaContent(html, 'og:novel:status');
+  const latest = metaContent(html, 'og:novel:latest_chapter_name');
+  const updated = metaContent(html, 'og:novel:update_time');
+  const desc = metaContent(html, 'og:description');
+  const readUrl = metaContent(html, 'og:novel:read_url');
+  if (category) info.category = category;
+  if (status) info.status = status;
+  if (latest) info.latestChapter = latest;
+  if (updated) info.updatedAt = updated;
+  if (desc) {
+    const intro = cleanIntro(desc, title);
+    if (intro) info.intro = intro;
+  }
+  if (readUrl) {
+    const link = parseChapterLink(bookId, readUrl);
+    if (link && link.pageIndex === 0) info.firstChapterId = link.id;
+  }
+  return info;
+}
+
+/* ------------------------------------------------------------------ */
+/* 站内搜索（POST /search.html，字段 s）                                 */
+/* ------------------------------------------------------------------ */
+
+/** 规范化搜索词；不合法时返回 null */
+export function normalizeSearchQuery(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return null;
+  const q = raw.replace(/\s+/g, ' ').trim();
+  if (q.length < 1 || [...q].length > 30) return null;
+  return q;
+}
+
+function bookIdFromHref(href: string): string | null {
+  const m = href.match(/^(?:https?:\/\/(?:www\.)?wanshuge\.org)?\/book\/([1-9]\d{0,8})\/?$/i);
+  return m ? m[1]! : null;
+}
+
+function textOf(fragment: string): string {
+  return cleanText(fragment).replace(/\n+/g, ' ').trim();
+}
+
+/**
+ * 解析搜索结果页。支持两套模板：
+ *  - 桌面：ul#novel-search > li（s1 分类 / s2 书名 / s3 作者 / s4 最新章 / s5 日期）
+ *  - 移动：a.list[href=/book/{id}/]（h4 书名 / .info 简介）
+ * 页面里找不到结果容器（模板变化/被拦截）时返回 null，由调用方按错误处理。
+ */
+export function parseSearchResults(html: string): BookSummary[] | null {
+  const out: BookSummary[] = [];
+  const seen = new Set<string>();
+  const push = (b: BookSummary) => {
+    if (seen.has(b.id) || out.length >= MAX_SEARCH_RESULTS) return;
+    seen.add(b.id);
+    out.push(b);
+  };
+
+  const desktop = html.match(/<ul[^>]*id=["']novel-search["'][^>]*>([\s\S]*?)<\/ul>/i);
+  if (desktop) {
+    const liRe = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = liRe.exec(desktop[1]!))) {
+      const li = m[1]!;
+      const span = (cls: string) =>
+        li.match(new RegExp(`<span[^>]*class=["']${cls}["'][^>]*>([\\s\\S]*?)<\\/span>`, 'i'))?.[1];
+      const s2 = span('s2');
+      if (!s2) continue;
+      const a = s2.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+      if (!a) continue;
+      const id = bookIdFromHref(decodeEntities(a[1]!));
+      const title = textOf(a[2]!);
+      if (!id || !title) continue;
+      const b: BookSummary = { id, title };
+      const author = span('s3') && textOf(span('s3')!);
+      const category = span('s1') && textOf(span('s1')!).replace(/^\[|\]$/g, '');
+      const latest = span('s4') && textOf(span('s4')!);
+      const updated = span('s5') && textOf(span('s5')!);
+      if (author) b.author = author;
+      if (category) b.category = category;
+      if (latest) b.latestChapter = latest;
+      if (updated) b.updated = updated;
+      push(b);
+    }
+    return out;
+  }
+
+  // 移动模板：从“搜索结果”标题到下一个版块（“完结小说推荐”等）之间
+  const head = html.search(/<h2[^>]*>[^<]*搜索结果/);
+  if (head < 0) return null;
+  let region = html.slice(head);
+  const next = region.slice(1).search(/<div[^>]*class=["'][^"']*\bindex_qb\b/i);
+  if (next >= 0) region = region.slice(0, next + 1);
+  const aRe = /<a\b([^>]*class=["'][^"']*\blist\b[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = aRe.exec(region))) {
+    const attrs = m[1]!;
+    const href = attrs.match(/href=["']([^"']+)["']/i)?.[1];
+    const id = href ? bookIdFromHref(decodeEntities(href)) : null;
+    if (!id) continue;
+    const body = m[2]!;
+    const title =
+      textOf(body.match(/<h4[^>]*>([\s\S]*?)<\/h4>/i)?.[1] ?? '') ||
+      decodeEntities(attrs.match(/title=["']([^"']*)["']/i)?.[1] ?? '').trim();
+    if (!title) continue;
+    const b: BookSummary = { id, title };
+    const info = body.match(/<div[^>]*class=["']info["'][^>]*>([\s\S]*?)<\/div>/i)?.[1];
+    if (info) {
+      const intro = cleanIntro(textOf(info), title);
+      if (intro) b.intro = intro;
+    }
+    push(b);
+  }
+  return out;
+}
+
+let lastSearchAt = 0;
+let searchChain: Promise<void> = Promise.resolve();
+
+/** 测试用：重置搜索闸门 */
+export function resetSearchGate(): void {
+  lastSearchAt = 0;
+  searchChain = Promise.resolve();
+}
+
+/**
+ * 站内搜索：经统一上游队列（高优先级）发送 POST；
+ * 另有串行闸门保证两次上游搜索至少间隔 MIN_SEARCH_GAP_MS（源站自带限频）。
+ */
+export async function searchBooks(query: string, opts: FetchOptions = {}): Promise<BookSummary[]> {
+  const q = normalizeSearchQuery(query);
+  if (q === null) throw new SourceError('invalid search query', 'invalid', false);
+  const sleep = opts.sleep ?? defaultSleep;
+  const gate = searchChain.then(async () => {
+    const wait = lastSearchAt + MIN_SEARCH_GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastSearchAt = Date.now();
+  });
+  searchChain = gate.catch(() => undefined);
+  await gate;
+  const { html } = await fetchSourceHtml(SEARCH_URL, {
+    ...opts,
+    highPriority: true,
+    form: `s=${encodeURIComponent(q)}`,
+  });
+  const results = parseSearchResults(html);
+  if (results === null) throw new SourceError('unexpected search page', 'invalid', true);
+  return results;
 }

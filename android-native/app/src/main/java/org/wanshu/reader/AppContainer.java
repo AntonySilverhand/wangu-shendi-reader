@@ -4,6 +4,8 @@ import android.content.Context;
 import androidx.room.Room;
 import org.wanshu.reader.core.net.SourceHttpClient;
 import org.wanshu.reader.core.queue.RequestScheduler;
+import org.wanshu.reader.core.queue.SearchGate;
+import org.wanshu.reader.core.queue.SystemSchedulerClock;
 import org.wanshu.reader.core.text.TextBlockBuilder;
 import org.wanshu.reader.core.util.JavaBase64Decoder;
 import org.wanshu.reader.data.AppExecutors;
@@ -15,6 +17,7 @@ import org.wanshu.reader.data.repository.PersonalRepository;
 import org.wanshu.reader.data.repository.ReaderRepository;
 import org.wanshu.reader.navigation.AppNavigator;
 import org.wanshu.reader.navigation.BackController;
+import org.wanshu.reader.ui.cover.CoverLoader;
 
 public class AppContainer {
     private final Context applicationContext;
@@ -26,6 +29,8 @@ public class AppContainer {
     private final ContentRepository contentRepository;
     private final RequestScheduler scheduler;
     private final SourceHttpClient httpClient;
+    private final SearchGate searchGate;
+    private final CoverLoader coverLoader;
     private final ReaderRepository readerRepository;
     private final TextBlockBuilder textBlockBuilder;
     private final AppNavigator navigator;
@@ -54,6 +59,8 @@ public class AppContainer {
 
         this.scheduler = new RequestScheduler();
         this.httpClient = new SourceHttpClient();
+        this.searchGate = new SearchGate(new SystemSchedulerClock());
+        this.coverLoader = new CoverLoader(this.applicationContext.getCacheDir(), scheduler, httpClient, executors);
         this.contentRepository.setTocLoader(new org.wanshu.reader.data.repository.NativeTocLoader(
                 contentDb, scheduler, httpClient, executors.getContentDbExecutor()));
         this.readerRepository = new ReaderRepository(
@@ -99,6 +106,14 @@ public class AppContainer {
 
     public SourceHttpClient getHttpClient() {
         return httpClient;
+    }
+
+    public SearchGate getSearchGate() {
+        return searchGate;
+    }
+
+    public CoverLoader getCoverLoader() {
+        return coverLoader;
     }
 
     public ReaderRepository getReaderRepository() {

@@ -26,7 +26,7 @@ public class ChapterKey {
     }
 
     public boolean isOnlineBook() {
-        return "36780".equals(bookId);
+        return BookKey.isOnlineId(bookId);
     }
 
     @Override

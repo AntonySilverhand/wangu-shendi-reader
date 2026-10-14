@@ -15,7 +15,8 @@ import java.util.Map;
  *  - 页面 origin 固定为 https://reader.local/（不依赖随机端口 → Web Storage/IndexedDB
  *    跨启动稳定）；
  *  - 所有资源请求由 shouldInterceptRequest 从 APK assets 提供；
- *  - /native/source 走受限书源代理（只允许 wanshuge.org 的 book 36780 路径）；
+ *  - /native/source 走受限书源代理（只允许 wanshuge.org 上校验过的书号路径与站内搜索）；
+ *  - /native/cover?book= 取封面图（只允许 /img/{书号}.jpg）；
  *  - 任何 reader.local 之外的请求一律拒绝（不开放任意 URL 代理）。
  */
 public final class AssetClient extends WebViewClient {
@@ -81,6 +82,9 @@ public final class AssetClient extends WebViewClient {
     if (path.equals("/native/source")) {
       return handleSource(url.getQuery());
     }
+    if (path.equals("/native/cover")) {
+      return handleCover(url.getQuery());
+    }
     try {
       byte[] data = provider.open(path);
       if (data == null) {
@@ -97,24 +101,42 @@ public final class AssetClient extends WebViewClient {
     }
   }
 
-  private WebResourceResponse handleSource(String query) {
-    String target = null;
-    if (query != null) {
-      for (String pair : query.split("&")) {
-        int eq = pair.indexOf('=');
-        if (eq > 0 && pair.substring(0, eq).equals("url")) {
-          try {
-            target = URLDecoder.decode(pair.substring(eq + 1), "UTF-8");
-          } catch (Exception e) {
-            target = null;
-          }
+  /** 查询参数取值（URL 解码）；不存在时返回 null */
+  private static String queryParam(String query, String name) {
+    if (query == null) return null;
+    for (String pair : query.split("&")) {
+      int eq = pair.indexOf('=');
+      if (eq > 0 && pair.substring(0, eq).equals(name)) {
+        try {
+          return URLDecoder.decode(pair.substring(eq + 1), "UTF-8");
+        } catch (Exception e) {
+          return null;
         }
       }
     }
+    return null;
+  }
+
+  private WebResourceResponse handleCover(String query) {
+    SourceResult result = proxy.fetchCover(queryParam(query, "book"));
+    if (result.status != 200) {
+      return response("text/plain", result.status, result.errorMessage);
+    }
+    Map<String, String> headers = new java.util.HashMap<>();
+    String mime = result.contentType.split(";")[0].trim();
+    headers.put("Content-Type", mime);
+    headers.put("Cache-Control", "max-age=604800");
+    return new WebResourceResponse(mime, null, 200, "OK", headers,
+        new ByteArrayInputStream(result.body));
+  }
+
+  private WebResourceResponse handleSource(String query) {
+    String target = queryParam(query, "url");
     if (target == null || target.isEmpty()) {
       return response("text/plain", 400, "missing url");
     }
-    SourceResult result = proxy.fetch(target);
+    // 站内搜索：WebView 拦截时拿不到请求体，表单放在 query 中由原生以 POST 发出
+    SourceResult result = proxy.fetch(target, queryParam(query, "form"));
     if (result.status != 200) {
       return response("text/plain", result.status, result.errorMessage);
     }
