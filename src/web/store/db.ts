@@ -26,6 +26,8 @@ export interface ChapterRecord {
   missingPages?: number[];
   /** 是否已取到全部分页（旧记录缺省为 undefined，会被视为需要补全） */
   complete?: boolean;
+  /** 源站会员门槛：只公开了部分内容 */
+  restricted?: boolean;
   /** 缓存记录版本 */
   v?: number;
 }
@@ -152,6 +154,13 @@ export async function getToc(bookId: string): Promise<TocRecord | null> {
   const tx = db.transaction(STORE_TOC, 'readonly');
   const value = await wrapRequest<TocRecord | undefined>(tx.objectStore(STORE_TOC).get(bookId));
   return value ?? null;
+}
+
+export async function deleteToc(bookId: string): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(STORE_TOC, 'readwrite');
+  tx.objectStore(STORE_TOC).delete(bookId);
+  await txDone(tx);
 }
 
 export async function putToc(record: TocRecord): Promise<void> {

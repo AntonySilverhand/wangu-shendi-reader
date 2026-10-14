@@ -5,6 +5,10 @@ import { apiGet } from './remote.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
 const refreshing = new Set<string>();
+
+function chapterApiPath(bookId: string, chapterId: string, background = false): string {
+  return `/api/chapter?book=${encodeURIComponent(bookId)}&id=${encodeURIComponent(chapterId)}${background ? '&background=1' : ''}`;
+}
 export const CHAPTER_CACHE_VERSION = 4;
 
 /** 版本变更时清掉旧缓存记录：旧版本可能存着“去重后缺段”的内容，绝不能继续复用 */
@@ -46,7 +50,7 @@ async function refreshInBackground(bookId: string, chapterId: string, stale: Cha
   if (inFlight.has(key) || refreshing.has(key)) return;
   refreshing.add(key);
   try {
-    const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}`, {
+    const data = await apiGet<ChapterResult>(chapterApiPath(bookId, chapterId), {
       retries: 0,
       timeoutMs: 30_000,
     });
@@ -82,6 +86,7 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
     nextId: data.nextId,
     missingPages: data.missingPages ?? [],
     complete: data.complete === true,
+    ...(data.restricted ? { restricted: true } : {}),
     v: CHAPTER_CACHE_VERSION,
   };
 }
@@ -118,7 +123,7 @@ export async function loadChapterRecord(
   const task = (async () => {
     opts.onNetworkStart?.();
     try {
-      const data = await apiGet<ChapterResult>(`/api/chapter?id=${encodeURIComponent(chapterId)}${opts.background ? '&background=1' : ''}`, {
+      const data = await apiGet<ChapterResult>(chapterApiPath(bookId, chapterId, opts.background), {
         signal: opts.signal,
         retries: 0,
         timeoutMs: 20_000,

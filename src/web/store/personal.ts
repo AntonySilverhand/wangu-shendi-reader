@@ -235,13 +235,15 @@ export class PersonalStore {
     this.changed();
   }
 
-  exportData(settings: Settings): string {
+  /** extra：随备份一起导出的其他个人数据（如书架） */
+  exportData(settings: Settings, extra: Record<string, unknown> = {}): string {
     const payload = {
       app: 'wangu-shendi-reader',
       version: 1,
       exportedAt: new Date().toISOString(),
       settings,
       personal: this.data,
+      ...extra,
     };
     return JSON.stringify(payload, null, 2);
   }

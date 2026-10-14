@@ -1,6 +1,7 @@
 /**
  * 目录 Store：分页拉取 + 持久化 + 合并 + 搜索。
- * 源站目录有 44 页（约 4300 章），首屏只加载前几页，其余按需/后台加载。
+ * 源站目录每页约 100 章（《万古神帝》44 页），首屏只加载前几页，其余按需/后台加载。
+ * 新书的总页数在拿到第 2 页（含分页下拉）之前未知，先按 2 页处理。
  *
  * 状态语义（不再把“加载失败”与“未加载”混进一个 boolean）：
  *  - pageEntries      ：已成功加载的页
@@ -12,7 +13,7 @@
  */
 import type { TocEntry } from '../../shared/source.ts';
 import { mergeTocEntries } from '../../shared/source.ts';
-import type { TocRangeResult } from '../../shared/source.ts';
+import type { BookInfo, TocRangeResult } from '../../shared/source.ts';
 import { getToc, putToc } from './db.ts';
 import { apiGet } from './remote.ts';
 import { isAbortError } from './toc-search.ts';
@@ -20,6 +21,8 @@ import { isAbortError } from './toc-search.ts';
 export const TOC_CHUNK_PAGES = 4;
 /** 源站目录每页约 100 章（用于数字章节号定位的初始估计） */
 export const TOC_PAGE_SPAN_ESTIMATE = 100;
+/** 总页数未知时的初始值：第 2 页带分页下拉，加载后即得真实页数 */
+export const TOC_UNKNOWN_TOTAL_PAGES = 2;
 
 export interface TocSearchResult {
   index: number;
@@ -43,7 +46,9 @@ export class TocStore {
   extras: TocEntry[] = [];
   all: TocEntry[] = [];
   private idToIndex = new Map<string, number>();
-  totalPages = 44;
+  totalPages = TOC_UNKNOWN_TOTAL_PAGES;
+  /** 目录第 1 页（详情页）附带的书籍信息 */
+  onBookInfo: ((info: BookInfo) => void) | null = null;
   private listeners = new Set<Listener>();
   private loadGeneration = 0;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,7 +120,7 @@ export class TocStore {
     try {
       const record = await getToc(this.bookId);
       if (record) {
-        this.totalPages = record.totalPages || 44;
+        this.totalPages = record.totalPages || TOC_UNKNOWN_TOTAL_PAGES;
         for (const [page, entries] of Object.entries(record.pages)) {
           this.pageEntries.set(parseInt(page, 10), entries);
         }
@@ -206,11 +211,12 @@ export class TocStore {
         this.emit();
         try {
           const result = await this.loader<TocRangeResult>(
-            `/api/toc?from=${chunkFrom}&to=${chunkTo}`,
+            `/api/toc?book=${encodeURIComponent(this.bookId)}&from=${chunkFrom}&to=${chunkTo}`,
             { retries: 2, onRetry: () => undefined, signal },
           );
           if (generation !== this.loadGeneration) return;
           this.totalPages = result.totalPages || this.totalPages;
+          if (result.book) this.onBookInfo?.(result.book);
           for (const page of result.pages) {
             this.pageEntries.set(page.page, page.entries);
             this.failedPages.delete(page.page);
@@ -383,6 +389,7 @@ export class TocStore {
     this.extras = [];
     this.all = [];
     this.idToIndex.clear();
+    this.totalPages = TOC_UNKNOWN_TOTAL_PAGES;
     this.initialized = false;
     this.emit();
   }

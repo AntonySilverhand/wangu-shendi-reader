@@ -59,6 +59,11 @@ export class ReaderView {
     return this.current?.record.chapterId ?? null;
   }
 
+  /** 已渲染章节所属的书（切书后旧章节的滚动/保存不能记到新书上） */
+  get currentBookId(): string | null {
+    return this.current?.record.bookId ?? null;
+  }
+
   get currentEntry(): TocEntry | null {
     return this.current?.entry ?? null;
   }

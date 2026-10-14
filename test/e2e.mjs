@@ -192,7 +192,7 @@ async function main() {
   check('目录搜索有结果', searchRows >= 1, `${searchRows} 条`);
   await page.locator('#toc-panel .toc-row').first().click();
   await page.waitForFunction(
-    () => location.hash.startsWith('#/read/') && document.querySelectorAll('#chapter-content p').length > 5,
+    () => /^#\/book\/[^/]+\/read\//.test(location.hash) && document.querySelectorAll('#chapter-content p').length > 5,
     null,
     { timeout: 90_000 },
   );
@@ -396,11 +396,11 @@ async function main() {
   await tp.click('.quick-card:has-text("下载与缓存")');
   await tp.waitForSelector('[data-testid=data-sheet]', { timeout: 10_000 });
   await tp.setInputFiles('input[type=file][accept*=".txt"]', txtPath);
-  await tp.waitForSelector('.quick-card:has-text("test-book")', { timeout: 60_000 });
+  await tp.waitForSelector('.shelf-card:has-text("test-book")', { timeout: 60_000 });
   check('TXT 导入后出现在书架', true);
-  await tp.click('.quick-card:has-text("test-book") button:has-text("打开")');
+  await tp.click('.shelf-card:has-text("test-book") .shelf-open');
   await tp.waitForFunction(
-    () => location.hash.startsWith('#/read/') && document.querySelectorAll('#chapter-content p').length > 0,
+    () => /^#\/book\/[^/]+\/read\//.test(location.hash) && document.querySelectorAll('#chapter-content p').length > 0,
     null,
     { timeout: 60_000 },
   );
@@ -408,6 +408,94 @@ async function main() {
   check('本地书可阅读', Boolean(localTitle && localTitle.includes('起点')), localTitle ?? '');
   await txtCtx.close();
 
+  }
+
+  if (runPart(3)) {
+  console.log('\n[14] 多书：搜索书源 → 详情 → 阅读 → 重载 → 书架切换（API 由 fixture 模拟，不依赖源站）');
+  const mctx = await newContext(browser, VIEWPORTS[1]);
+  const mp = await mctx.newPage();
+  const mErrors = [];
+  mp.on('pageerror', (err) => mErrors.push(String(err)));
+  const searchCalls = [];
+  const fakeBook = {
+    id: '230580',
+    title: '测试多书',
+    author: '测试作者',
+    category: '玄幻修真',
+    status: '已完结',
+    intro: '这是一本用于端到端测试的书。',
+    latestChapter: '第2章',
+  };
+  const fakeEntries = [
+    { id: '72836268', title: '第1章 开端', displayTitle: '第1章 开端', number: 1, extra: false },
+    { id: '72836269', title: '第2章 继续', displayTitle: '第2章 继续', number: 2, extra: false },
+  ];
+  const fakeChapter = (id) => ({
+    id,
+    title: fakeEntries.find((e) => e.id === id)?.title ?? '章节',
+    paragraphs: Array.from({ length: 30 }, (_, i) => `测试多书 ${id} 的第 ${i + 1} 段正文。`),
+    prevId: id === '72836269' ? '72836268' : null,
+    nextId: id === '72836268' ? '72836269' : null,
+    pageCount: 1,
+    charCount: 600,
+    complete: true,
+    missingPages: [],
+  });
+  await mp.route('**/api/search*', (route) => {
+    searchCalls.push(route.request().url());
+    return route.fulfill({ json: { query: '测试', results: [fakeBook] } });
+  });
+  await mp.route('**/api/toc?book=230580*', (route) =>
+    route.fulfill({
+      json: { from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: fakeEntries }], failedPages: [], book: { ...fakeBook } },
+    }),
+  );
+  await mp.route('**/api/chapter?book=230580*', (route) => {
+    const id = new URL(route.request().url()).searchParams.get('id');
+    return route.fulfill({ json: fakeChapter(id) });
+  });
+  await mp.route('**/img/**', (route) => route.fulfill({ status: 404, body: '' }));
+
+  await mp.goto(`${BASE}/#/`, { waitUntil: 'domcontentloaded' });
+  await mp.waitForSelector('#continue-reading', { timeout: 30_000 });
+  check('书架首页显示预置书', (await mp.locator('.shelf-card[data-book-id="36780"]').count()) === 1);
+  await mp.click('#open-discover');
+  await mp.waitForSelector('#discover-input');
+  await mp.fill('#discover-input', '测试');
+  await mp.click('#discover-submit');
+  await mp.waitForSelector('.discover-item[data-book-id="230580"]', { timeout: 15_000 });
+  check('搜索结果出现', true);
+  check('搜索词写入地址栏', (await mp.evaluate(() => location.hash)).startsWith('#/search?q='));
+  await mp.screenshot({ path: `${SHOT_DIR}multi-search.png` });
+  await mp.click('.discover-item[data-book-id="230580"]');
+  await mp.waitForSelector('[data-testid=book-sheet] .book-intro:has-text("端到端")', { timeout: 15_000 });
+  check('详情面板显示简介', true);
+  await mp.click('#book-read');
+  await mp.waitForFunction(
+    () => location.hash === '#/book/230580/read/72836268' && document.querySelectorAll('#chapter-content p').length >= 30,
+    null,
+    { timeout: 30_000 },
+  );
+  check('开始阅读：地址含书号与章节号', true);
+  check('顶栏显示新书书名', (await mp.locator('.topbar-title strong').textContent()) === '测试多书');
+  await mp.reload({ waitUntil: 'domcontentloaded' });
+  await mp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
+  check('重载后仍在该书该章', (await mp.evaluate(() => location.hash)) === '#/book/230580/read/72836268');
+  await mp.click('[data-testid=home-btn]', { force: true });
+  await mp.waitForSelector('.shelf-card[data-book-id="230580"]');
+  check('书架出现两本', (await mp.locator('.shelf-card').count()) === 2);
+  check('当前书大卡片为新书', (await mp.locator('.book-card h2').textContent()) === '测试多书');
+  const progress = await mp.evaluate(() => JSON.parse(localStorage.getItem('reader.personal.v1') ?? '{}').books?.['36780']?.progress ?? null);
+  check('切书未污染预置书进度', progress === null || progress.chapterId !== '72836268');
+  await mp.screenshot({ path: `${SHOT_DIR}multi-shelf.png`, fullPage: true });
+  await mp.goto(`${BASE}/#/book/230580`, { waitUntil: 'domcontentloaded' });
+  await mp.waitForSelector('.book-card');
+  await mp.click('.shelf-card[data-book-id="230580"] .shelf-remove');
+  await mp.click('.sheet .row-actions button:has-text("确定")');
+  await mp.waitForFunction(() => !document.querySelector('.shelf-card[data-book-id="230580"]'), null, { timeout: 10_000 });
+  check('移出书架后当前书回到预置书', (await mp.locator('.book-card h2').textContent()) === '万古神帝');
+  check('多书流程无页面错误', mErrors.length === 0, mErrors.slice(0, 2).join(' | '));
+  await mctx.close();
   }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
