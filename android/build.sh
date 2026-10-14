@@ -52,7 +52,7 @@ echo "[4/6] 生成 dex"
 
 echo "[5/6] 打包"
 cp build/base.apk build/unsigned.apk
-(cd build/dex && zip -q ../unsigned.apk classes.dex)
+(cd build/dex && "$AAPT" add -k ../unsigned.apk classes.dex >/dev/null)
 "$ZIPALIGN" -f 4 build/unsigned.apk build/aligned.apk
 
 echo "[6/6] 签名"
