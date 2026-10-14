@@ -29,6 +29,9 @@ public interface BookDao {
     @Query("DELETE FROM books WHERE book_id = :bookId AND source_type = 'LOCAL_TXT'")
     int deleteLocalBook(String bookId);
 
+    @Query("DELETE FROM books WHERE book_id = :bookId AND source_type = 'ONLINE'")
+    int deleteOnlineBook(String bookId);
+
     @Query("DELETE FROM books WHERE book_id = :bookId")
     int deleteBook(String bookId);
 }

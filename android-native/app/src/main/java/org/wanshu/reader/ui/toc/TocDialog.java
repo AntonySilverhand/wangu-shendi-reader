@@ -23,6 +23,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
+import org.wanshu.reader.core.model.BookKey;
 import org.wanshu.reader.data.AppExecutors;
 import org.wanshu.reader.data.content.ChapterCacheStatus;
 import org.wanshu.reader.data.content.entity.TocEntryEntity;
@@ -151,7 +152,7 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
 
         loadAllBtn = Ui.button(ctx, "加载全目录", null);
         loadAllBtn.setOnClickListener(this);
-        if (bookId.startsWith("local-")) {
+        if (!BookKey.isOnlineId(bookId)) {
             loadAllBtn.setVisibility(View.GONE);
         }
         filterRow.addView(loadAllBtn);
@@ -248,8 +249,8 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
 
     public void applyLoadProgress(int loaded, int total, boolean finished, String error, long generation) {
         if (!isShowing() || !loading || generation != loadGeneration) return;
-        loadStatusView.setText(error == null ? "目录 " + loaded + "/" + total + " 页" : "目录加载暂停：" + error);
-        loadAllBtn.setText(finished ? (error == null ? "目录已载入" : "重试未载入目录") : "加载 " + loaded + "/" + total);
+        loadStatusView.setText(error == null ? "目录 " + loaded + "/" + (total > 0 ? String.valueOf(total) : "?") + " 页" : "目录加载暂停：" + error);
+        loadAllBtn.setText(finished ? (error == null ? "目录已载入" : "重试未载入目录") : "加载 " + loaded + "/" + (total > 0 ? String.valueOf(total) : "?"));
         loadAllBtn.setEnabled(finished && error != null);
         // Reloading the whole list per page is wasteful; refresh every few pages and at the end.
         if (finished || loaded % 4 == 1) loadData();
@@ -369,7 +370,7 @@ public class TocDialog extends Dialog implements DialogDismissHandler, TocItemCl
     }
 
     public void onLoadAllClicked() {
-        if (!"36780".equals(bookId) || loading) return;
+        if (!BookKey.isOnlineId(bookId) || loading) return;
         if (contentRepository.getTocLoader() == null) { applyLoadError("目录加载器不可用"); return; }
         loading = true;
         loadAllBtn.setEnabled(false); loadAllBtn.setText("正在加载…");

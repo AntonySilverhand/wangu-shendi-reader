@@ -29,7 +29,7 @@ public class FetchChapterSchedulerAction implements SchedulerAction<ChapterResul
 
     @Override
     public ChapterResult execute(CancellationToken token) throws Exception {
-        HttpPageFetcher pageFetcher = new HttpPageFetcher(client, decoder, token);
+        HttpPageFetcher pageFetcher = new HttpPageFetcher(bookId, client, decoder, token);
         ChapterAssembler assembler = new ChapterAssembler(pageFetcher);
         return assembler.assemble(bookId, chapterId);
     }

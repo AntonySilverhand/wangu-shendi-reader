@@ -9,11 +9,16 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.wanshu.reader.ui.theme.ThemeColors;
 
 public class HeaderViewHolder extends RecyclerView.ViewHolder {
-    private final TextView titleView;
+    /** Shown under the title when the source only publishes part of the chapter (member-only). */
+    public static final String RESTRICTED_NOTICE = "源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制";
 
-    public HeaderViewHolder(View itemView, TextView titleView) {
+    private final TextView titleView;
+    private final TextView noticeView;
+
+    public HeaderViewHolder(View itemView, TextView titleView, TextView noticeView) {
         super(itemView);
         this.titleView = titleView;
+        this.noticeView = noticeView;
     }
 
     public static HeaderViewHolder create(ViewGroup parent) {
@@ -34,13 +39,26 @@ public class HeaderViewHolder extends RecyclerView.ViewHolder {
         ));
         layout.addView(tv);
 
-        return new HeaderViewHolder(layout, tv);
+        TextView notice = new TextView(parent.getContext());
+        notice.setTextSize(13f);
+        notice.setText(RESTRICTED_NOTICE);
+        notice.setPadding(0, 16, 0, 0);
+        notice.setVisibility(View.GONE);
+        notice.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+        layout.addView(notice);
+
+        return new HeaderViewHolder(layout, tv, notice);
     }
 
-    public void bind(String title, ThemeColors colors) {
+    public void bind(String title, boolean restricted, ThemeColors colors) {
         titleView.setText(title != null ? title : "");
+        noticeView.setVisibility(restricted ? View.VISIBLE : View.GONE);
         if (colors != null) {
             titleView.setTextColor(colors.text);
+            noticeView.setTextColor(colors.secondaryText);
         }
     }
 }

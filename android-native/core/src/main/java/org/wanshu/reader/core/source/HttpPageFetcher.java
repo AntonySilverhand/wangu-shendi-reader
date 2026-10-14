@@ -8,25 +8,28 @@ import org.wanshu.reader.core.util.Base64Decoder;
 
 public class HttpPageFetcher implements PageFetcher {
 
+    private final String bookId;
     private final SourceHttpClient client;
     private final Base64Decoder decoder;
     private final CancellationToken token;
 
-    public HttpPageFetcher(SourceHttpClient client, Base64Decoder decoder, CancellationToken token) {
+    public HttpPageFetcher(String bookId, SourceHttpClient client, Base64Decoder decoder, CancellationToken token) {
+        SourceUrls.assertBookId(bookId);
+        this.bookId = bookId;
         this.client = client != null ? client : new SourceHttpClient();
         this.decoder = decoder;
         this.token = token;
     }
 
-    public HttpPageFetcher(SourceHttpClient client, Base64Decoder decoder) {
-        this(client, decoder, null);
+    public HttpPageFetcher(String bookId, SourceHttpClient client, Base64Decoder decoder) {
+        this(bookId, client, decoder, null);
     }
 
     @Override
     public PageFetchOutcome fetch(String chapterId, int pageIndex) {
         String url;
         try {
-            url = SourceUrls.buildChapterUrl(chapterId, pageIndex);
+            url = SourceUrls.buildChapterUrl(bookId, chapterId, pageIndex);
         } catch (Exception e) {
             return PageFetchOutcome.failed(e);
         }
@@ -40,7 +43,7 @@ public class HttpPageFetcher implements PageFetcher {
                 return PageFetchOutcome.failed(new IOException("HTTP error " + resp.getStatusCode() + " on " + url));
             }
 
-            RawChapterPage page = SourceParser.parseChapterPage(resp.getBody(), chapterId, pageIndex, decoder);
+            RawChapterPage page = SourceParser.parseChapterPage(bookId, resp.getBody(), chapterId, pageIndex, decoder);
             return PageFetchOutcome.ok(page);
         } catch (Throwable t) {
             return PageFetchOutcome.failed(t);

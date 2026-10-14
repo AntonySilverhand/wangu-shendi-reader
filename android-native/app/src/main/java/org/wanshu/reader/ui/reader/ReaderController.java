@@ -165,7 +165,7 @@ public class ReaderController implements ReaderAnchorSaver, DialogDismissHandler
         currentPrevChapterId = result.getPrevChapterId(); currentNextChapterId = result.getNextChapterId();
         currentParagraphs = new ArrayList<String>(result.getParagraphs());
         hasShownContent = true; completeShown = result.isComplete(); shownCharCount = result.getCharCount();
-        view.showContent(result.getTitle(), blocks, currentPrevChapterId != null, currentNextChapterId != null);
+        view.showContent(result.getTitle(), blocks, currentPrevChapterId != null, currentNextChapterId != null, result.isRestricted());
         if (anchor != null) view.restoreAnchor(anchor.getParagraphIndex(), anchor.getOffsetUtf16());
         else if (targetParagraph >= 0) view.restoreAnchor(targetParagraph, Math.max(0, targetOffset));
         if (view.isSearchBarVisible()) onSearchQueryChanged(view.getSearchEditText().getText().toString());
