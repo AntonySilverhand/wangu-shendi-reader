@@ -1,8 +1,11 @@
 package org.wanshu.reader.core.net;
 
 public class HttpFetchResponse {
+    private static final byte[] NO_BYTES = new byte[0];
+
     private final int statusCode;
     private final String body;
+    private final byte[] bodyBytes;
     private final Long retryAfterSeconds;
     private final String contentType;
     private final String finalUrl;
@@ -14,8 +17,20 @@ public class HttpFetchResponse {
             String contentType,
             String finalUrl
     ) {
+        this(statusCode, body, NO_BYTES, retryAfterSeconds, contentType, finalUrl);
+    }
+
+    public HttpFetchResponse(
+            int statusCode,
+            String body,
+            byte[] bodyBytes,
+            Long retryAfterSeconds,
+            String contentType,
+            String finalUrl
+    ) {
         this.statusCode = statusCode;
         this.body = body != null ? body : "";
+        this.bodyBytes = bodyBytes != null ? bodyBytes : NO_BYTES;
         this.retryAfterSeconds = retryAfterSeconds;
         this.contentType = contentType;
         this.finalUrl = finalUrl;
@@ -27,6 +42,11 @@ public class HttpFetchResponse {
 
     public String getBody() {
         return body;
+    }
+
+    /** Raw body; only filled for binary fetches (images), empty for text responses. */
+    public byte[] getBodyBytes() {
+        return bodyBytes;
     }
 
     public Long getRetryAfterSeconds() {

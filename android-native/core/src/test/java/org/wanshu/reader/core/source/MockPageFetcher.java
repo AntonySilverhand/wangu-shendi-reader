@@ -10,6 +10,15 @@ public class MockPageFetcher implements PageFetcher {
     private final Map<Integer, String> pages = new HashMap<Integer, String>();
     private final Set<Integer> failPages = new HashSet<Integer>();
     private final JavaBase64Decoder decoder = new JavaBase64Decoder();
+    private final String bookId;
+
+    public MockPageFetcher() {
+        this(SourceUrls.DEFAULT_BOOK_ID);
+    }
+
+    public MockPageFetcher(String bookId) {
+        this.bookId = bookId;
+    }
 
     public void addPage(int pageIndex, String html) {
         pages.put(pageIndex, html);
@@ -28,7 +37,7 @@ public class MockPageFetcher implements PageFetcher {
         if (html == null) {
             return PageFetchOutcome.notFound();
         }
-        RawChapterPage page = SourceParser.parseChapterPage(html, chapterId, pageIndex, decoder);
+        RawChapterPage page = SourceParser.parseChapterPage(bookId, html, chapterId, pageIndex, decoder);
         return PageFetchOutcome.ok(page);
     }
 }

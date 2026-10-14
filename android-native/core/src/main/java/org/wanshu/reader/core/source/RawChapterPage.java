@@ -14,6 +14,7 @@ public class RawChapterPage {
     private final Integer nextPageIndex;
     private final List<Integer> sameChapterPages;
     private final Integer declaredPageIndex;
+    private final boolean restricted;
 
     public RawChapterPage(
             String id,
@@ -25,6 +26,22 @@ public class RawChapterPage {
             Integer nextPageIndex,
             List<Integer> sameChapterPages,
             Integer declaredPageIndex
+    ) {
+        this(id, pageIndex, title, paragraphs, prevChapterId, nextChapterId, nextPageIndex,
+                sameChapterPages, declaredPageIndex, false);
+    }
+
+    public RawChapterPage(
+            String id,
+            int pageIndex,
+            String title,
+            List<String> paragraphs,
+            String prevChapterId,
+            String nextChapterId,
+            Integer nextPageIndex,
+            List<Integer> sameChapterPages,
+            Integer declaredPageIndex,
+            boolean restricted
     ) {
         this.id = id;
         this.pageIndex = pageIndex;
@@ -39,6 +56,7 @@ public class RawChapterPage {
                 ? Collections.unmodifiableList(new ArrayList<Integer>(sameChapterPages))
                 : Collections.<Integer>emptyList();
         this.declaredPageIndex = declaredPageIndex;
+        this.restricted = restricted;
     }
 
     public String getId() {
@@ -75,5 +93,10 @@ public class RawChapterPage {
 
     public Integer getDeclaredPageIndex() {
         return declaredPageIndex;
+    }
+
+    /** The page carries the source's member-only notice (only part of the chapter is public). */
+    public boolean isRestricted() {
+        return restricted;
     }
 }

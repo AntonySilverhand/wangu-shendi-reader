@@ -17,7 +17,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(0, FixtureHelper.readFixture("chapter-13375259-p1.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "13375259");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "13375259");
 
         assertEquals("13375259", result.getChapterId());
         assertTrue(result.getParagraphs().size() > 0);
@@ -31,7 +31,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(0, FixtureHelper.readFixture("chapter-8924760-p1.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "8924760");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "8924760");
 
         assertEquals("8924760", result.getChapterId());
         assertTrue(result.getParagraphs().size() > 0);
@@ -46,7 +46,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(2, FixtureHelper.readFixture("chapter-38621328-p3.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "38621328");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "38621328");
 
         assertEquals("38621328", result.getChapterId());
         assertEquals(3, result.getPageCount());
@@ -63,7 +63,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(3, FixtureHelper.readFixture("chapter-38621571-loopback.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "38621571");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "38621571");
 
         assertEquals("38621571", result.getChapterId());
         assertEquals(3, result.getPageCount());
@@ -81,7 +81,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(4, FixtureHelper.readFixture("chapter-38626103-p5.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "38626103");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "38626103");
 
         assertEquals("38626103", result.getChapterId());
         assertEquals(5, result.getPageCount());
@@ -99,7 +99,7 @@ public class ChapterAssemblerTest {
         fetcher.addPage(4, FixtureHelper.readFixture("chapter-38626103-p5.html"));
 
         ChapterAssembler assembler = new ChapterAssembler(fetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "38626103");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "38626103");
 
         assertEquals("38626103", result.getChapterId());
         assertEquals(4, result.getPageCount()); // 0, 1, 2, 4
@@ -119,7 +119,7 @@ public class ChapterAssemblerTest {
         );
 
         ChapterAssembler assembler = new ChapterAssembler(syntheticFetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "999");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "999");
 
         List<String> paras = result.getParagraphs();
         // Boundary "末段" deduplicated once
@@ -146,7 +146,7 @@ public class ChapterAssemblerTest {
         gapFetcher.addFailure(1);
 
         ChapterAssembler assembler = new ChapterAssembler(gapFetcher);
-        ChapterResult result = assembler.assemble(SourceUrls.BOOK_ID, "888");
+        ChapterResult result = assembler.assemble(SourceUrls.DEFAULT_BOOK_ID, "888");
 
         List<String> paras = result.getParagraphs();
         // Since Page 1 is missing, Page 0 and Page 2 are NOT adjacent -> "段落B" is NOT deduplicated!

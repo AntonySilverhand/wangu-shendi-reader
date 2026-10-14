@@ -19,6 +19,7 @@ public class ChapterResult {
     private final boolean complete;
     private final List<Integer> missingPages;
     private final int sourceSemanticsVersion;
+    private final boolean restricted;
 
     public ChapterResult(
             String bookId,
@@ -31,7 +32,8 @@ public class ChapterResult {
             int charCount,
             boolean complete,
             List<Integer> missingPages,
-            int sourceSemanticsVersion
+            int sourceSemanticsVersion,
+            boolean restricted
     ) {
         if (bookId == null || bookId.trim().isEmpty()) {
             throw new IllegalArgumentException("bookId must not be empty");
@@ -54,6 +56,24 @@ public class ChapterResult {
                 ? Collections.unmodifiableList(new ArrayList<Integer>(missingPages))
                 : Collections.<Integer>emptyList();
         this.sourceSemanticsVersion = sourceSemanticsVersion;
+        this.restricted = restricted;
+    }
+
+    public ChapterResult(
+            String bookId,
+            String chapterId,
+            String title,
+            List<String> paragraphs,
+            String prevChapterId,
+            String nextChapterId,
+            int pageCount,
+            int charCount,
+            boolean complete,
+            List<Integer> missingPages,
+            int sourceSemanticsVersion
+    ) {
+        this(bookId, chapterId, title, paragraphs, prevChapterId, nextChapterId, pageCount, charCount,
+                complete, missingPages, sourceSemanticsVersion, false);
     }
 
     public ChapterResult(
@@ -127,6 +147,11 @@ public class ChapterResult {
         return sourceSemanticsVersion;
     }
 
+    /** The source only publishes part of this chapter (member-only); the app does not bypass that. */
+    public boolean isRestricted() {
+        return restricted;
+    }
+
     public ChapterKey toChapterKey() {
         return new ChapterKey(bookId, chapterId);
     }
@@ -140,6 +165,7 @@ public class ChapterResult {
                 charCount == that.charCount &&
                 complete == that.complete &&
                 sourceSemanticsVersion == that.sourceSemanticsVersion &&
+                restricted == that.restricted &&
                 Objects.equals(bookId, that.bookId) &&
                 Objects.equals(chapterId, that.chapterId) &&
                 Objects.equals(title, that.title) &&
@@ -162,7 +188,8 @@ public class ChapterResult {
                 charCount,
                 complete,
                 missingPages,
-                sourceSemanticsVersion
+                sourceSemanticsVersion,
+                restricted
         );
     }
 
