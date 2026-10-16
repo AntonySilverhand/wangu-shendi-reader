@@ -29,8 +29,10 @@ public class TocMerger {
     /**
      * Main chapters follow upload order (ascending id), matching the source's own "next chapter" links.
      * The source renumbers backwards in places (e.g. after 第3409章 comes 第三千三百八十九章), so sorting by
-     * chapter number would interleave two stretches of the story. Same number + same title keeps the earliest;
-     * a "分节阅读第N节" placeholder yields to a titled version in place; late batch re-uploads are dropped.
+     * chapter number would interleave two stretches of the story. Same number + same title keeps the earliest.
+     * Re-uploads are judged by id distance only: late batch re-uploads are dropped, and a late titled version
+     * replaces an early "分节阅读第N节" placeholder in place. Same-number entries within one batch are distinct
+     * misnumbered chapters and are all kept (dropping them skips chapters while reading).
      */
     public static List<TocEntry> mergeTocPages(List<List<TocEntry>> pages) {
         Map<String, TocEntry> unique = new HashMap<String, TocEntry>();
@@ -47,30 +49,43 @@ public class TocMerger {
         List<TocEntry> main = new ArrayList<TocEntry>();
         Map<Integer, List<Integer>> byNumber = new HashMap<Integer, List<Integer>>();
         Map<String, Long> firstIdByTitle = new HashMap<String, Long>();
-        int maxTitledNumber = 0;
+        List<long[]> titled = new ArrayList<long[]>(); // kept titled entries as {id, number}, ascending id
+        int farCursor = 0;
+        long farMaxNumber = 0; // max number among kept titled entries more than REUPLOAD_ID_GAP below this id
         for (int k = 0; k < ordered.size(); k++) {
             TocEntry entry = ordered.get(k);
+            long id = Long.parseLong(entry.getChapterId());
+            while (farCursor < titled.size() && id - titled.get(farCursor)[0] > REUPLOAD_ID_GAP) {
+                farMaxNumber = Math.max(farMaxNumber, titled.get(farCursor)[1]);
+                farCursor++;
+            }
             Integer parsed = TitleNormalizer.normalizeTitle(entry.getTitle()).getNumber();
             int number = parsed == null || parsed < 0 ? 0 : parsed;
             String rest = restTitle(entry);
             List<Integer> same = byNumber.get(number);
             if (same == null) same = new ArrayList<Integer>();
-            if (rest.isEmpty()) {
-                if (!same.isEmpty() || maxTitledNumber > number) continue;
-            } else {
-                boolean duplicate = false;
-                Integer placeholder = null;
-                for (int j = 0; j < same.size(); j++) {
-                    String other = restTitle(main.get(same.get(j)));
-                    if (other.equals(rest)) duplicate = true;
-                    if (other.isEmpty() && placeholder == null) placeholder = same.get(j);
+            boolean duplicate = false;
+            Integer placeholder = null;
+            for (int j = 0; j < same.size(); j++) {
+                TocEntry other = main.get(same.get(j));
+                String otherRest = restTitle(other);
+                if (otherRest.equals(rest)) duplicate = true;
+                if (otherRest.isEmpty() && placeholder == null
+                        && id - Long.parseLong(other.getChapterId()) > REUPLOAD_ID_GAP) {
+                    placeholder = same.get(j);
                 }
-                if (duplicate) continue;
-                long id = Long.parseLong(entry.getChapterId());
+            }
+            if (duplicate) continue;
+            if (rest.isEmpty()) {
+                // Placeholder whose number was already published long before: late re-upload batch.
+                if (farMaxNumber >= number) continue;
+            } else {
                 Long firstId = firstIdByTitle.get(rest);
                 if (firstId != null && id - firstId > REUPLOAD_ID_GAP) continue;
                 if (firstId == null) firstIdByTitle.put(rest, id);
-                maxTitledNumber = Math.max(maxTitledNumber, number);
+                titled.add(new long[] {id, number});
+                // Only a late re-upload replaces an early placeholder; a same-number entry inside the
+                // same batch is a different, misnumbered chapter and must be kept.
                 if (placeholder != null) {
                     main.set(placeholder, entry);
                     continue;
