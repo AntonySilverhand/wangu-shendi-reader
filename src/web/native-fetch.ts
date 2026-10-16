@@ -9,9 +9,10 @@ export function installNativeFetch(): void {
     // 站内搜索为 POST：拦截层拿不到请求体，表单经 query 传给原生，由原生发 POST
     const form = init?.method === 'POST' && typeof init.body === 'string' ? `&form=${encodeURIComponent(init.body)}` : '';
     const res = await realFetch(`/native/source?url=${encodeURIComponent(url)}${form}`, { signal: init?.signal });
-    const out = new Response(await res.text(), {
+    // 原样转交字节与字符集：69书吧是 GBK，res.text() 会按 UTF-8 解码成乱码
+    const out = new Response(await res.arrayBuffer(), {
       status: res.status,
-      headers: { 'content-type': 'text/html; charset=utf-8' },
+      headers: { 'content-type': res.headers.get('content-type') ?? 'text/html; charset=utf-8' },
     });
     Object.defineProperty(out, 'url', { value: res.headers.get('x-final-url') ?? url });
     return out;

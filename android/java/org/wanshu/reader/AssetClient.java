@@ -15,8 +15,8 @@ import java.util.Map;
  *  - 页面 origin 固定为 https://reader.local/（不依赖随机端口 → Web Storage/IndexedDB
  *    跨启动稳定）；
  *  - 所有资源请求由 shouldInterceptRequest 从 APK assets 提供；
- *  - /native/source 走受限书源代理（只允许 wanshuge.org 上校验过的书号路径与站内搜索）；
- *  - /native/cover?book= 取封面图（只允许 /img/{书号}.jpg）；
+ *  - /native/source 走受限书源代理（只允许万书阁/69书吧上校验过的书号路径与站内搜索）；
+ *  - /native/cover?book= 取封面图（只允许书号拼出的封面路径）；
  *  - 任何 reader.local 之外的请求一律拒绝（不开放任意 URL 代理）。
  */
 public final class AssetClient extends WebViewClient {
@@ -140,11 +140,14 @@ public final class AssetClient extends WebViewClient {
     if (result.status != 200) {
       return response("text/plain", result.status, result.errorMessage);
     }
+    // 原始字节 + 上游字符集（GBK 页面不能当 UTF-8 转发），JS 侧按 Content-Type 解码
+    String contentType = result.contentType != null ? result.contentType : "text/html; charset=utf-8";
+    String charset = SourceRules.charsetOf(contentType, null);
     Map<String, String> headers = new java.util.HashMap<>();
-    headers.put("Content-Type", "text/html; charset=utf-8");
+    headers.put("Content-Type", contentType);
     headers.put("Cache-Control", "no-store");
     if (result.finalUrl != null) headers.put("X-Final-Url", result.finalUrl);
-    return new WebResourceResponse("text/html", "utf-8", 200, "OK", headers,
+    return new WebResourceResponse("text/html", charset, 200, "OK", headers,
         new ByteArrayInputStream(result.body));
   }
 

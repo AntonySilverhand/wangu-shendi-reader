@@ -22,6 +22,7 @@ import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
 import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
+import { DEFAULT_SOURCE, isSourceId, placeholderTitle, type SourceId } from '../shared/sources.ts';
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 
@@ -109,9 +110,12 @@ export class App {
         showToast(`已加入书架：${book.title}`);
       },
       onRemove: (bookId) => void this.removeBook(bookId),
-      onQueryChange: (q) => {
-        const target = `#/search?q=${encodeURIComponent(q)}`;
+      onQueryChange: (q, source) => {
+        const target = `#/search?q=${encodeURIComponent(q)}${source === DEFAULT_SOURCE ? '' : `&source=${source}`}`;
         if (location.hash !== target) location.hash = target;
+      },
+      onOpenUrl: (bookId, chapterId) => {
+        location.hash = chapterId ? `#/book/${bookId}/read/${chapterId}` : `#/book/${bookId}`;
       },
       hasProgress: (bookId) => this.personal.getProgress(bookId) !== null,
     });
@@ -503,12 +507,12 @@ export class App {
    *  #/book/{bookId}/read/{chapterId}  阅读
    *  #/book/{bookId}/toc               目录
    *  #/book/{bookId}                   切到该书并回书架
-   *  #/search?q=                       书源搜索
+   *  #/search?q=&source=               书源搜索（source 缺省为万书阁）
    *  #/read/{chapterId}、#/toc         旧链接（预置书 / 当前书）
    */
   private async applyRoute(): Promise<void> {
     const hash = location.hash.replace(/^#/, '');
-    const search = hash.match(/^\/search(?:\?q=([^&]*))?$/);
+    const search = hash.match(/^\/search(?:\?q=([^&]*)(?:&source=([a-z0-9]{1,20}))?)?$/);
     if (search) {
       let q: string | null = null;
       try {
@@ -516,7 +520,8 @@ export class App {
       } catch {
         q = null;
       }
-      this.showDiscover(q);
+      const source: SourceId = isSourceId(search[2]) ? search[2] : DEFAULT_SOURCE;
+      this.showDiscover(q, source);
       return;
     }
     const bookRoute = hash.match(/^\/book\/([A-Za-z0-9-]{1,40})(\/read\/(\d{1,12})|\/toc)?\/?$/);
@@ -555,7 +560,7 @@ export class App {
   /** 让 bookId 成为当前书（不改变视图）。远程书不在书架上时以占位信息加入，目录加载后补全。 */
   private async ensureBook(bookId: string): Promise<boolean> {
     if (isRemoteBookId(bookId)) {
-      if (!this.library.has(bookId)) this.library.upsert({ id: bookId, title: `书号 ${bookId}` });
+      if (!this.library.has(bookId)) this.library.upsert({ id: bookId, title: placeholderTitle(bookId) });
     } else if (!isLocalBookId(bookId) || !this.localBooks.some((b) => b.id === bookId)) {
       return false;
     }
@@ -568,7 +573,7 @@ export class App {
     else location.hash = '';
   }
 
-  private showDiscover(query: string | null): void {
+  private showDiscover(query: string | null, source: SourceId = DEFAULT_SOURCE): void {
     this.reader.flushPosition();
     this.chapterController?.abort();
     this.chapterGeneration++;
@@ -576,7 +581,7 @@ export class App {
     this.cancelPrefetch();
     this.tocView.close();
     this.setView('discover');
-    this.discover.show(query);
+    this.discover.show(query, source);
   }
 
   private openDiscover(): void {
@@ -632,7 +637,7 @@ export class App {
   }
 
   private currentBookTitle(): string {
-    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? `书号 ${this.bookId}`;
+    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? placeholderTitle(this.bookId);
     return this.localBooks.find((b) => b.id === this.bookId)?.title ?? '本地书籍';
   }
 
@@ -681,7 +686,7 @@ export class App {
     const offline = navigator.onLine === false;
     this.reader.renderError(
       offline ? '离线状态下无法获取目录。' : '暂时无法从书源获取章节列表。',
-      offline ? '联网后可重试；已下载的章节仍可在目录中打开。' : '可点击重试，或稍后再试。',
+      offline ? '联网后可重试；已下载的章节仍可在目录中打开。' : this.toc.lastError ?? '可点击重试，或稍后再试。',
     );
   }
 

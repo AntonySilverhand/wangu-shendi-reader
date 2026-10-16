@@ -5,7 +5,7 @@
 ## 项目是什么
 
 万书阅读器：手机优先、干净、可离线的中文小说阅读网站 + Android APK。
-书源是万书阁（wanshuge.org）：可在书源中搜索并阅读任意书，预置书为《万古神帝》（book 36780）。
+书源是万书阁（wanshuge.org）与 69书吧（www.69shuba.com）：可在书源中搜索并阅读任意书，预置书为《万古神帝》（万书阁 book 36780）。
 前端是原生 TypeScript（无框架）+ Vite；后端是一份同构代码，本地跑 Node、线上跑 Cloudflare Worker。
 另有 Android WebView 壳（`android/`）与开发中的纯原生 App（`android-native/`，见其 AGENTS.md）。
 
@@ -20,6 +20,7 @@ bash tools/verify.sh     # 构建 + 起服务 + 聚焦回归（约 1 分钟，�
 node test/e2e.mjs <url> 1   # E2E 第 1 段（29 项）
 node test/e2e.mjs <url> 2   # E2E 第 2 段（29 项，本环境单命令限 2 分钟故分段）
 node test/e2e.mjs <url> 3   # E2E 第 3 段（多书：搜索→详情→阅读→书架，API 由 fixture 模拟）
+node test/e2e.mjs <url> 4   # E2E 第 4 段（69书吧：切换书源/粘贴网址/人机验证提示，API 由 fixture 模拟）
 bash tools/test-android-source.sh   # Android 壳书源白名单 JVM 单测（无需 SDK）
 node test/verify-delivery.mjs   # 交付验证（内容完整性/旧缓存补全/连续翻章/无轮询）
 node test/check-layout.mjs      # 宽屏形态验证（1100/1500 断点）
@@ -33,7 +34,8 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # 发布：CI（.github/workflows/rel
 ## 目录结构
 
 ```
-src/shared/    同构：source.ts（书源适配/解析）、api.ts（/api 路由 + 缓存接口）
+src/shared/    同构：source.ts（万书阁适配 + 上游队列/字符集/人机验证识别）、source-69shuba.ts（69书吧适配）、
+               sources.ts（按书号分派书源、封面、粘贴网址解析）、api.ts（/api 路由 + 缓存接口）
 src/server/    Node：dev.ts（静态+API）、middleware.ts、file-cache.ts（磁盘缓存）、vite-plugin.ts
 src/worker/    Cloudflare Worker 入口（Cache API）
 src/web/       app.ts（编排 + 路由）cover.ts（封面）
@@ -53,9 +55,9 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 4. **缓存键改动必须升版本**（如 `chapter:v2:`）。服务端磁盘缓存（`.cache/api`）与客户端 IndexedDB 都可能残留旧数据；改缓存语义时同步升 `CHAPTER_CACHE_VERSION`，并让旧记录失效后**先显示缓存再后台补全**（不可阻塞阅读）。
 5. **`complete` 语义**：只有 `ChapterResult.complete === true` 才算完整；客户端把 `undefined` 当不完整处理（触发补全）。章节内容永远"宁多勿少"——补全结果更短时不要覆盖。
 6. **Service Worker 缓存必须按构建号隔离**（`reader-shell-<build>` / `reader-runtime-<build>`），激活时清理旧版本；否则旧 JS 会持续提供，造成"修了还在复现"。
-7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许万书阁上由**校验过的书号/章节号**拼出的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`——三端（`source.ts`、`SourceRules.java`、原生 `UrlSafetyValidator`）保持同一白名单。
+7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛/Cloudflare 人机验证、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许由**校验过的书号/章节号**拼出的路径：万书阁的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`；69书吧的 `/book/{n}.htm`、`/book/{n}/`、`/txt/{n}/{id}`、`POST /modules/article/search.php`（表单仅 `searchkey=…&searchtype=all`）与 `static.69shuba.com` 封面。`source.ts`/`source-69shuba.ts` 与 `SourceRules.java` 保持同一白名单；原生 `UrlSafetyValidator` 目前只有万书阁（原生尚未接入 69书吧，接入时同步）。人机验证页一律报 `blocked`（不重试、不求解）。
 8. **保持轻量**：不引入前端框架/网络字体；静态资源体积目标 < 150KB gzip。
-9. **书号即 bookId**：远程书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），本地书为 `local-xxx`。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。
+9. **书号即 bookId，书号决定书源**：万书阁书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），69书吧书为 `69shuba-{数字}`，本地书为 `local-xxx`。判定统一用 `sources.ts` 的 `sourceOfBook`/`isRemoteBookId`，不要在别处手写正则。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。新增书源：加一个适配文件 + 在 `sources.ts` 注册 + 新书号前缀，不要复用纯数字书号。
 10. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
 
 ## 书源适配速查
@@ -70,6 +72,15 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 - **同 chapterId 的分页链接 = 下一页；不同 chapterId = 下一章**。合并分页、按段落去重、保持顺序；后页失败时保留已取内容并标 `missingPages`（客户端提示"继续加载"）。
 - 源站有重复上传与错号：同章号优先保留有标题版本，同号不同标题都保留；番外按序号归位、同标题保留最新 id。
 - 源站偶发连接重置，属正常现象：靠重试 + 缓存消化，不要因此改成并发。
+
+## 69书吧适配速查
+
+- 书号 `69shuba-{n}`；页面 GBK 编码（`decodeHtml` 按 Content-Type/meta 解码；Android 壳原样转交字节与 charset）。
+- 详情 `/book/{n}.htm`：og meta 优先，缺失时读 `div.booknav2`（h1 / 作者：authorarticle 链接 / 分类：）与 `div.navtxt`。
+- 目录 `/book/{n}/`：单页全量，只取 `div#catalog` 内 `li[data-num] > a[href=/txt/{n}/{id}]`，按 data-num 升序（缺失时按文档顺序、倒序则翻转）。顺序以源站为准，`mergeBookToc` 只去重，**不套用万书阁的错号/重传启发式**；番外原位保留（extra=false）。API 只返回第 1 页、`totalPages: 1`。
+- 章节 `/txt/{n}/{id}`：不分页；正文为 `div.txtnav` 内裸文本 + `<br>`，剔除 h1、`div.txtinfo`、`div#txtright`、`div.contentadv` 等与站点广告行、“(本章完)”，首行重复标题去掉；上一章/下一章取 `bookinfo.preview_page/next_page`（指向书页/目录即无），缺失时按按钮文字。识别到正文与导航才 `complete: true`。
+- 搜索 `POST /modules/article/search.php`，`searchkey` 为 GBK 百分号编码（`encodeGbkComponent`，用运行时 GBK 解码器反推码表），结果 `div.newbox li`；唯一结果时跳详情页。另有 5 秒搜索闸门。
+- **整站前置 Cloudflare**：云端开发环境拿到的都是挑战页，解析器与 fixture（`test/fixtures/69shuba/`，GBK 合成样例）尚未经真实页面验证；拿到真实页面后优先替换 fixture 再改解析。
 
 ## 验证要求（提交前）
 

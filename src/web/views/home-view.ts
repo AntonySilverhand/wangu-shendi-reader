@@ -1,6 +1,7 @@
 import { el } from '../dom.ts';
 import { formatTime } from '../format.ts';
 import { renderCover } from '../cover.ts';
+import { sourceNameOf, sourceOfBook } from '../../shared/sources.ts';
 import type { PersonalStore } from '../store/personal.ts';
 import type { TocStore } from '../store/toc.ts';
 
@@ -177,7 +178,7 @@ function shelfSection(deps: HomeDeps): HTMLElement {
           'span',
           { class: 'shelf-info' },
           el('strong', { text: book.title }),
-          el('span', { text: book.local ? '本地导入' : book.author || '佚名' }),
+          el('span', { text: book.local ? '本地导入' : shelfByline(book) }),
           el('span', { class: 'shelf-status', text: status }),
         ),
       ),
@@ -196,6 +197,12 @@ function shelfSection(deps: HomeDeps): HTMLElement {
   }
   section.appendChild(grid);
   return section;
+}
+
+/** 作者；非默认书源的书附上书源名，便于区分同名书 */
+function shelfByline(book: ShelfBook): string {
+  const author = book.author || '佚名';
+  return sourceOfBook(book.id) === '69shuba' ? `${author} · ${sourceNameOf(book.id)}` : author;
 }
 
 function quickCard(title: string, hint: string, onClick: () => void): HTMLElement {

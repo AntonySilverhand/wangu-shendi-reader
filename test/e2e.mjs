@@ -497,6 +497,99 @@ async function main() {
   check('多书流程无页面错误', mErrors.length === 0, mErrors.slice(0, 2).join(' | '));
   await mctx.close();
   }
+  if (runPart(4)) {
+  console.log('\n[15] 69书吧：切换书源 → 搜索 → 详情 → 阅读 → 书架；粘贴网址；人机验证提示（API 由 fixture 模拟）');
+  const sctx = await newContext(browser, VIEWPORTS[1]);
+  const sp = await sctx.newPage();
+  const sErrors = [];
+  sp.on('pageerror', (err) => sErrors.push(String(err)));
+  const BOOK69 = '69shuba-51254';
+  const book69 = { id: BOOK69, title: '测试书名', author: '测试作者', category: '玄幻魔法', status: '连载', intro: '少年持剑出山，一路向北。', latestChapter: '第2章 拜师' };
+  const entries69 = [
+    { id: '30001001', title: '第1章 出山', displayTitle: '第1章 出山', number: 1, extra: false },
+    { id: '30001002', title: '第2章 拜师', displayTitle: '第2章 拜师', number: 2, extra: false },
+    { id: '30001003', title: '第3章 封锁', displayTitle: '第3章 封锁', number: 3, extra: false },
+  ];
+  const chapter69 = (id) => ({
+    id,
+    title: entries69.find((e) => e.id === id)?.title ?? '章节',
+    paragraphs: Array.from({ length: 30 }, (_, i) => `69书吧测试 ${id} 第 ${i + 1} 段。`),
+    prevId: null,
+    nextId: null,
+    pageCount: 1,
+    charCount: 400,
+    complete: true,
+    missingPages: [],
+  });
+  const searchUrls = [];
+  await sp.route('**/api/search*', (route) => {
+    searchUrls.push(route.request().url());
+    return route.fulfill({ json: { query: '测试', source: '69shuba', results: [book69] } });
+  });
+  await sp.route(`**/api/toc?book=${BOOK69}*`, (route) =>
+    route.fulfill({ json: { from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: entries69 }], failedPages: [], book: { ...book69 } } }),
+  );
+  await sp.route(`**/api/chapter?book=${BOOK69}*`, (route) => {
+    const id = new URL(route.request().url()).searchParams.get('id');
+    if (id === '30001003') {
+      return route.fulfill({
+        status: 502,
+        json: { error: { code: 'blocked', message: '书源开启了人机验证（Cloudflare），当前网络无法直接获取，请稍后再试或换个网络', retryable: false } },
+      });
+    }
+    return route.fulfill({ json: chapter69(id) });
+  });
+  await sp.route('**/files/article/image/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await sp.route('**/img/**', (route) => route.fulfill({ status: 404, body: '' }));
+
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.click('.discover-sources button[data-source="69shuba"]');
+  check('书源切换为 69书吧', (await sp.getAttribute('.discover-sources button[data-source="69shuba"]', 'aria-pressed')) === 'true');
+  await sp.fill('#discover-input', '测试');
+  await sp.click('#discover-submit');
+  await sp.waitForSelector(`.discover-item[data-book-id="${BOOK69}"]`, { timeout: 15_000 });
+  check('搜索请求带 source=69shuba', searchUrls.some((u) => new URL(u).searchParams.get('source') === '69shuba'), searchUrls.join(' '));
+  check('地址栏记录书源', (await sp.evaluate(() => location.hash)).includes('&source=69shuba'));
+  await sp.reload({ waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector(`.discover-item[data-book-id="${BOOK69}"]`, { timeout: 15_000 });
+  check('重载后仍在 69书吧 搜索', (await sp.getAttribute('.discover-sources button[data-source="69shuba"]', 'aria-pressed')) === 'true');
+  await sp.screenshot({ path: `${SHOT_DIR}shuba-search.png` });
+  await sp.click(`.discover-item[data-book-id="${BOOK69}"]`);
+  await sp.waitForSelector('[data-testid=book-sheet] .book-intro:has-text("持剑出山")', { timeout: 15_000 });
+  check('详情面板标注书源', ((await sp.locator('[data-testid=book-sheet] .author').textContent()) ?? '').includes('69书吧'));
+  await sp.click('#book-read');
+  await sp.waitForFunction(
+    (id) => location.hash === `#/book/${id}/read/30001001` && document.querySelectorAll('#chapter-content p').length >= 30,
+    BOOK69,
+    { timeout: 30_000 },
+  );
+  check('69书吧的书可阅读', true);
+  // 详情面板关闭动画期间遮罩仍在，会吞掉点击
+  await sp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await sp.click('[data-testid=home-btn]', { force: true });
+  await sp.waitForSelector(`.shelf-card[data-book-id="${BOOK69}"]`);
+  check('书架卡片标注 69书吧', ((await sp.locator(`.shelf-card[data-book-id="${BOOK69}"] .shelf-info`).textContent()) ?? '').includes('69书吧'));
+
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.fill('#discover-input', 'https://www.69shuba.com/book/51254/');
+  await sp.click('#discover-submit');
+  await sp.waitForSelector('[data-testid=book-sheet] h2:has-text("测试书名")', { timeout: 15_000 });
+  check('粘贴书籍网址直接打开详情', true);
+  await sp.keyboard.press('Escape');
+  await sp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.fill('#discover-input', 'https://www.69shuba.com/txt/51254/30001003');
+  await sp.click('#discover-submit');
+  await sp.waitForFunction(() => location.hash.endsWith('/read/30001003'), null, { timeout: 15_000 });
+  await sp.waitForFunction(() => document.body.textContent?.includes('人机验证'), null, { timeout: 15_000 });
+  check('粘贴章节网址直达该章；人机验证给出明确提示', true);
+  await sp.screenshot({ path: `${SHOT_DIR}shuba-blocked.png` });
+  check('69书吧流程无页面错误', sErrors.length === 0, sErrors.slice(0, 2).join(' | '));
+  await sctx.close();
+  }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 

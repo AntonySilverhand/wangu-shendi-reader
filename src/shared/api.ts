@@ -5,17 +5,23 @@
 import {
   DEFAULT_BOOK,
   SITE,
-  fetchChapter,
-  fetchTocRange,
-  isValidBookId,
   normalizeSearchQuery,
-  searchBooks,
   SourceError,
   type BookSummary,
   type ChapterResult,
   type FetchLike,
   type TocRangeResult,
 } from './source.ts';
+import {
+  DEFAULT_SOURCE,
+  fetchBookChapter,
+  fetchBookTocRange,
+  isRemoteBookId,
+  isSourceId,
+  searchSource,
+  SOURCES,
+  type SourceId,
+} from './sources.ts';
 
 export interface CachedResponse {
   status: number;
@@ -134,6 +140,7 @@ export async function handleApi(
           ok: true,
           site: { origin: SITE.origin, name: SITE.name },
           book: { id: DEFAULT_BOOK.id, title: DEFAULT_BOOK.title, author: DEFAULT_BOOK.author },
+          sources: SOURCES.map((s) => ({ id: s.id, name: s.name })),
           now: (ctx.now ?? Date.now)(),
         });
       }
@@ -146,9 +153,19 @@ export async function handleApi(
             { status: 400 },
           );
         }
-        return await cachedJson(ctx, `search:v1:${q}`, CACHE_TTL.search, async () => {
-          const results = await searchBooks(q, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries });
-          return { query: q, results } satisfies SearchResponse;
+        const rawSource = url.searchParams.get('source');
+        const source: SourceId | null = rawSource === null || rawSource === '' ? DEFAULT_SOURCE : isSourceId(rawSource) ? rawSource : null;
+        if (source === null) {
+          return json(
+            { error: { code: 'bad_source', message: '书源无效', retryable: false } },
+            { status: 400 },
+          );
+        }
+        // 万书阁沿用旧缓存键；其他书源带书源前缀
+        const key = source === DEFAULT_SOURCE ? `search:v1:${q}` : `search:v1:${source}:${q}`;
+        return await cachedJson(ctx, key, CACHE_TTL.search, async () => {
+          const results = await searchSource(source, q, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries });
+          return { query: q, source, results } satisfies SearchResponse;
         });
       }
 
@@ -171,7 +188,7 @@ export async function handleApi(
         }
         // v3：多书（book 参数）、totalPages 未知时为 0、范围含第 1 页时附带书籍信息
         return await cachedJson(ctx, `toc:v3:${book}:${from}-${to}`, CACHE_TTL.toc, () =>
-          fetchTocRange(book, from, to, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries }),
+          fetchBookTocRange(book, from, to, { fetcher: ctx.fetcher, signal: ctx.signal, retries: ctx.retries }),
         );
       }
 
@@ -195,7 +212,7 @@ export async function handleApi(
               headers: { 'x-reader-cache': 'hit', 'cache-control': 'no-store' },
             });
           }
-          const data = await fetchChapter(book, id, { fetcher: ctx.fetcher, retries: ctx.retries, signal: ctx.signal, highPriority: url.searchParams.get('background') !== '1' });
+          const data = await fetchBookChapter(book, id, { fetcher: ctx.fetcher, retries: ctx.retries, signal: ctx.signal, highPriority: url.searchParams.get('background') !== '1' });
           const ttl = data.complete ? CACHE_TTL.chapter : CACHE_TTL.chapterPartial;
           await ctx.cache.put(key, { status: 200, body: JSON.stringify(data) }, ttl);
           return json(data, {
@@ -217,6 +234,8 @@ export async function handleApi(
 
 export interface SearchResponse {
   query: string;
+  /** 旧缓存条目没有该字段（即万书阁） */
+  source?: SourceId;
   results: BookSummary[];
 }
 
@@ -226,11 +245,11 @@ export interface ApiResultTypes {
   search: SearchResponse;
 }
 
-/** book 参数可省略（兼容旧客户端，默认预置书）；非法时返回 null */
+/** book 参数可省略（兼容旧客户端，默认预置书）；任一书源的合法书号，非法时返回 null */
 function bookParam(params: URLSearchParams): string | null {
   const raw = params.get('book');
   if (raw === null || raw === '') return DEFAULT_BOOK.id;
-  return isValidBookId(raw) ? raw : null;
+  return isRemoteBookId(raw) ? raw : null;
 }
 
 function badBook(): Response {

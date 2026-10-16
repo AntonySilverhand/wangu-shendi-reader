@@ -1,17 +1,17 @@
 /**
- * 封面：远程书用源站 /img/{id}.jpg（Android 壳经受限的 /native/cover 代理），
- * 加载失败或本地导入书回退为文字封面。
+ * 封面：远程书用书源封面图（万书阁 /img/{id}.jpg、69书吧 static 图床；
+ * Android 壳经受限的 /native/cover 代理），加载失败或本地导入书回退为文字封面。
  */
 import { el } from './dom.ts';
-import { coverUrl } from '../shared/source.ts';
+import { bookCoverUrl } from '../shared/sources.ts';
 import { isRemoteBookId } from './store/library.ts';
 
 export function coverSrc(bookId: string): string | null {
   if (!isRemoteBookId(bookId)) return null;
   // 离线时直接用文字封面，避免无意义的失败请求
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
-  if (import.meta.env.VITE_TARGET === 'android') return `/native/cover?book=${bookId}`;
-  return coverUrl(bookId);
+  if (import.meta.env.VITE_TARGET === 'android') return `/native/cover?book=${encodeURIComponent(bookId)}`;
+  return bookCoverUrl(bookId);
 }
 
 /** 文字封面取书名前 4 字，竖排感由 CSS 控制 */
