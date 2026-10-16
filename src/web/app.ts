@@ -22,7 +22,7 @@ import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
 import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
 import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
-import { DEFAULT_SOURCE, isSourceId, placeholderTitle, type SourceId } from '../shared/sources.ts';
+import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 
@@ -117,6 +117,15 @@ export class App {
       onOpenUrl: (bookId, chapterId) => {
         location.hash = chapterId ? `#/book/${bookId}/read/${chapterId}` : `#/book/${bookId}`;
       },
+      isOnShelf: (bookId) => this.bookExists(bookId),
+      onDownloaded: (meta) => {
+        this.localBooks = listLocalBooks();
+        showToast(`已下载《${meta.title}》共 ${meta.chapters} 章`);
+        // 正在读的就是这本书：重建目录（章节可能有增减）
+        if (meta.id === this.bookId) void this.activateBook(meta.id);
+        this.discover.refresh();
+      },
+      onOpenLocal: (bookId) => void this.openBook(bookId),
       hasProgress: (bookId) => this.personal.getProgress(bookId) !== null,
     });
     this.library.subscribe(() => {
@@ -157,14 +166,18 @@ export class App {
       local: false,
       sortKey: sortKey(b.id, b.addedAt),
     }));
-    const local: ShelfBook[] = this.localBooks.map((b) => ({
-      id: b.id,
-      title: b.title,
-      author: '本地导入',
-      local: true,
-      sortKey: sortKey(b.id, b.importedAt),
-      note: `${b.chapters} 章 · ${formatTime(b.importedAt)}导入`,
-    }));
+    const local: ShelfBook[] = this.localBooks.map((b) => {
+      const source = sourceNameOf(b.id);
+      return {
+        id: b.id,
+        title: b.title,
+        // 书源整本下载的书：作者 · 书源；TXT 导入：本地导入
+        author: source ? `${b.author || '佚名'} · ${source}` : '本地导入',
+        local: true,
+        sortKey: sortKey(b.id, b.importedAt),
+        note: `${b.chapters} 章 · ${formatTime(b.importedAt)}${source ? '下载' : '导入'}`,
+      };
+    });
     return [...remote, ...local].sort((a, b) => b.sortKey - a.sortKey);
   }
 
@@ -638,11 +651,12 @@ export class App {
 
   private currentBookTitle(): string {
     if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? placeholderTitle(this.bookId);
-    return this.localBooks.find((b) => b.id === this.bookId)?.title ?? '本地书籍';
+    return this.localBooks.find((b) => b.id === this.bookId)?.title ?? (isLocalBookId(this.bookId) ? placeholderTitle(this.bookId) : '本地书籍');
   }
 
   private currentBookAuthor(): string {
     if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.author || '佚名';
+    if (isDownloadBookId(this.bookId)) return this.localBooks.find((b) => b.id === this.bookId)?.author || '佚名';
     return '本地导入';
   }
 
@@ -783,7 +797,8 @@ export class App {
     this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
     if (record.source === 'local') {
-      this.reader.showBanner('本地导入内容');
+      // 书源整本下载的书与在线书一样直接阅读，不提示“本地导入”
+      if (!isDownloadBookId(this.bookId)) this.reader.showBanner('本地导入内容');
     } else if (record.restricted) {
       this.reader.showBanner('源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制');
     } else if (record.missingPages && record.missingPages.length > 0) {
@@ -1140,7 +1155,9 @@ export class App {
       ? this.localBooks.find((b) => b.id === bookId)?.title
       : this.library.get(bookId)?.title;
     const ok = await confirmDialog(
-      local
+      isDownloadBookId(bookId)
+        ? `移除《${title ?? '本地书'}》？下载的正文将一并删除（可在“搜索书源”中重新下载）；阅读进度和书签保留。`
+        : local
         ? `移除《${title ?? '本地书'}》？导入的正文将一并删除（无法从书源恢复）。`
         : `把《${title ?? bookId}》移出书架？已缓存的正文会删除；阅读进度和书签保留，重新加入后可恢复。`,
     );

@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 final class SourceProxy {
   private static final int MAX_BODY = 4 * 1024 * 1024;
   private static final int MAX_IMAGE = 1024 * 1024;
+  /** 整本 TXT 压缩包上限（与 source-ixdzs.ts 的 IXDZS_MAX_ZIP_BYTES 一致） */
+  private static final int MAX_ZIP = 64 * 1024 * 1024;
 
   /** 目录/章节页（GET）；form 非空时为站内搜索（POST） */
   SourceResult fetch(String rawUrl, String form) {
@@ -20,7 +22,7 @@ final class SourceProxy {
       if (form != null) return post(url, form);
       // 每一跳都先验证，不跟随后再检查（禁止向任意地址发请求）。
       for (int hop = 0; hop < 5; hop++) {
-        if (!SourceRules.allowedPage(url)) return error(403, "forbidden");
+        if (!SourceRules.allowedPage(url) && !SourceRules.allowedGetSearch(url)) return error(403, "forbidden");
         HttpURLConnection conn = open(url, "text/html,application/xhtml+xml");
         try {
           int status = conn.getResponseCode();
@@ -62,6 +64,27 @@ final class SourceProxy {
       }
     } catch (Exception e) {
       return error(502, "cover failed: " + e.getMessage());
+    }
+  }
+
+  /** 整本下载（爱下电子书）：只允许书号拼出的压缩包地址，不跟随重定向 */
+  SourceResult fetchDownload(String bookId) {
+    String target = SourceRules.downloadUrl(bookId);
+    if (target == null) return error(400, "bad book");
+    try {
+      URL url = new URL(target);
+      if (!SourceRules.allowedDownload(url)) return error(403, "forbidden");
+      HttpURLConnection conn = open(url, "application/zip,application/octet-stream,*/*");
+      conn.setReadTimeout(60000);
+      try {
+        int status = conn.getResponseCode();
+        if (status != 200) return upstreamError(conn, status);
+        return new SourceResult(200, read(conn, MAX_ZIP), url.toString(), null, "application/zip");
+      } finally {
+        conn.disconnect();
+      }
+    } catch (Exception e) {
+      return error(502, "download failed: " + e.getMessage());
     }
   }
 

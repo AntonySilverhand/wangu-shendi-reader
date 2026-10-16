@@ -16,7 +16,7 @@ import {
   DEFAULT_SOURCE,
   fetchBookChapter,
   fetchBookTocRange,
-  isRemoteBookId,
+  isSourceBookId,
   isSourceId,
   searchSource,
   SOURCES,
@@ -249,7 +249,7 @@ export interface ApiResultTypes {
 function bookParam(params: URLSearchParams): string | null {
   const raw = params.get('book');
   if (raw === null || raw === '') return DEFAULT_BOOK.id;
-  return isRemoteBookId(raw) ? raw : null;
+  return isSourceBookId(raw) ? raw : null;
 }
 
 function badBook(): Response {

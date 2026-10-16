@@ -14,6 +14,8 @@
  */
 import {
   assertChapterId,
+  balancedDivInner,
+  divInner,
   cleanIntro,
   cleanText,
   decodeEntities,
@@ -124,33 +126,6 @@ function shubaPath(href: string): string | null {
 /* ------------------------------------------------------------------ */
 /* HTML helpers                                                        */
 /* ------------------------------------------------------------------ */
-
-/** 从开始标签末尾起做 div 深度匹配，返回内部 HTML（正则无法处理嵌套 div） */
-function balancedDivInner(html: string, openEnd: number): string {
-  const re = /<div\b[^>]*>|<\/div\s*>/gi;
-  re.lastIndex = openEnd;
-  let depth = 1;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    if (m[0][1] === '/') {
-      depth--;
-      if (depth === 0) return html.slice(openEnd, m.index);
-    } else {
-      depth++;
-    }
-  }
-  return html.slice(openEnd);
-}
-
-/** 第一个开始标签匹配 attrRe 的 div 的内部 HTML */
-function divInner(html: string, attrRe: RegExp): string | null {
-  const re = /<div\b([^>]*)>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    if (attrRe.test(m[1]!)) return balancedDivInner(html, m.index + m[0].length);
-  }
-  return null;
-}
 
 /** 删除开始标签匹配 attrRe 的所有 div（含嵌套内容） */
 function removeDivs(html: string, attrRe: RegExp): string {

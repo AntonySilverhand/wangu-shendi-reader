@@ -89,6 +89,8 @@ export interface BookInfo {
   updatedAt?: string;
   /** 首章 id（og:novel:read_url） */
   firstChapterId?: string;
+  /** 字数（如“1596.31万字”，部分书源提供） */
+  size?: string;
 }
 
 /** 搜索结果条目 */
@@ -376,6 +378,33 @@ export function extractAnchors(html: string): NavLink[] {
     links.push({ href, text });
   }
   return links;
+}
+
+/** 从开始标签末尾起做 div 深度匹配，返回内部 HTML（正则无法处理嵌套 div） */
+export function balancedDivInner(html: string, openEnd: number): string {
+  const re = /<div\b[^>]*>|<\/div\s*>/gi;
+  re.lastIndex = openEnd;
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (m[0][1] === '/') {
+      depth--;
+      if (depth === 0) return html.slice(openEnd, m.index);
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(openEnd);
+}
+
+/** 第一个开始标签匹配 attrRe 的 div 的内部 HTML */
+export function divInner(html: string, attrRe: RegExp): string | null {
+  const re = /<div\b([^>]*)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (attrRe.test(m[1]!)) return balancedDivInner(html, m.index + m[0].length);
+  }
+  return null;
 }
 
 /** 去掉 script/style/注释后再扫描链接，避免把 JS 字符串误认成 <a> */
@@ -1148,11 +1177,13 @@ export function decodeHtml(bytes: Uint8Array, contentType = ''): string {
   }
 }
 
-/** Cloudflare 等人机验证页（“Just a moment...”）。该页不含书籍内容，按 blocked 报告，绝不尝试求解。 */
+/** Cloudflare 等人机验证/安全验证页（“Just a moment...”“正在验证浏览器”）。该页不含书籍内容，按 blocked 报告，绝不尝试求解。 */
 export function isChallengeHtml(html: string): boolean {
   const head = html.slice(0, 8192);
   return (
-    /<title>\s*(Just a moment\.\.\.|Attention Required! \| Cloudflare|请稍候…)\s*<\/title>/i.test(head) ||
+    /<title>\s*(Just a moment\.\.\.|Attention Required! \| Cloudflare|请稍候…|正在验证浏览器)\s*<\/title>/i.test(head) ||
+    // 爱下电子书等站点的 JS 安全验证页：location.pathname + "?challenge=" + token
+    /["']\?challenge=["']/.test(head) ||
     // 只认挑战页特有的标记；正常页面也可能引用 challenges.cloudflare.com（Turnstile 组件）
     /_cf_chl_opt|cf_chl_|cf-challenge/i.test(head)
   );
@@ -1171,7 +1202,7 @@ async function isChallengeResponse(res: Response): Promise<boolean> {
 
 function challengeError(): SourceError {
   return new SourceError(
-    '书源开启了人机验证（Cloudflare），当前网络无法直接获取，请稍后再试或换个网络',
+    '书源开启了人机验证（如 Cloudflare），当前网络无法直接获取，请稍后再试或换个网络',
     'blocked',
     false,
     403,

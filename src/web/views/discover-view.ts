@@ -10,8 +10,11 @@ import { openSheet } from '../ui/sheet.ts';
 import type { LibraryStore } from '../store/library.ts';
 import type { SearchResponse } from '../../shared/api.ts';
 import type { BookInfo, BookSummary, TocRangeResult } from '../../shared/source.ts';
+import { downloadSourceBook, type DownloadProgress } from '../store/book-download.ts';
+import type { LocalBookMeta } from '../store/txt.ts';
 import {
   DEFAULT_SOURCE,
+  isDownloadBookId,
   parseBookUrl,
   placeholderTitle,
   SOURCES,
@@ -32,6 +35,12 @@ export interface DiscoverDeps {
   onQueryChange: (q: string, source: SourceId) => void;
   /** 粘贴的是章节网址：直接打开该书该章 */
   onOpenUrl: (bookId: string, chapterId?: string) => void;
+  /** 在书架上（在线书已加入 / 整本下载型已下载） */
+  isOnShelf: (bookId: string) => boolean;
+  /** 整本下载完成：登记为本机书 */
+  onDownloaded: (meta: LocalBookMeta) => void;
+  /** 打开已下载的书 */
+  onOpenLocal: (bookId: string) => void;
   hasProgress: (bookId: string) => boolean;
 }
 
@@ -146,7 +155,7 @@ export class DiscoverView {
       this.setStatus('');
       const source = sourceOfBook(ref.bookId);
       if (source && source !== this.source) this.selectSource(source, false);
-      if (ref.chapterId) {
+      if (ref.chapterId && (!isDownloadBookId(ref.bookId) || this.deps.isOnShelf(ref.bookId))) {
         this.deps.onOpenUrl(ref.bookId, ref.chapterId);
       } else {
         const known = this.deps.library.get(ref.bookId);
@@ -155,7 +164,7 @@ export class DiscoverView {
       return;
     }
     if (/^https?:\/\//i.test(q)) {
-      this.setStatus('暂不支持这个网址：目前支持万书阁与 69书吧 的书籍或章节网址');
+      this.setStatus(`暂不支持这个网址：目前支持${SOURCES.map((x) => x.name).join('、')}的书籍或章节网址`);
       return;
     }
     if (q.length > 30) {
@@ -228,7 +237,7 @@ export class DiscoverView {
     }
     this.setStatus(`${sourceMeta(this.lastSource).name}：“${this.lastQuery}”共 ${this.results.length} 条结果`);
     for (const book of this.results) {
-      const onShelf = this.deps.library.has(book.id);
+      const onShelf = this.deps.isOnShelf(book.id);
       const meta = [book.author, book.category].filter(Boolean).join(' · ');
       const card = el(
         'button',
@@ -247,7 +256,7 @@ export class DiscoverView {
           book.latestChapter ? el('span', { class: 'discover-meta', text: `最新：${book.latestChapter}` }) : null,
           book.intro ? el('span', { class: 'discover-intro', text: book.intro }) : null,
         ),
-        onShelf ? el('span', { class: 'badge', text: '已在书架' }) : null,
+        onShelf ? el('span', { class: 'badge', text: isDownloadBookId(book.id) ? '已下载' : '已在书架' }) : null,
       );
       this.listEl.appendChild(card);
     }
@@ -266,17 +275,96 @@ export function openBookSheet(
   let book: BookSummary | BookInfo = { ...initial };
   const body = el('div', { class: 'sheet-body book-sheet' });
   const controller = new AbortController();
-  const handle = openSheet({ title: book.title, body, testId: 'book-sheet', onClose: () => controller.abort() });
+  /** 整本下载型书源（爱下电子书）：没有“加入书架”，下载即入架 */
+  const downloadMode = isDownloadBookId(book.id);
+  let downloading: AbortController | null = null;
+  let statusText = '';
+  let statusEl: HTMLElement | null = null;
+  const handle = openSheet({
+    title: book.title,
+    body,
+    testId: 'book-sheet',
+    onClose: () => {
+      controller.abort();
+      downloading?.abort();
+    },
+  });
   let introNote: HTMLElement | null = null;
+
+  const setStatus = (text: string) => {
+    statusText = text;
+    if (statusEl) statusEl.textContent = text;
+  };
+
+  const downloadActions = (): HTMLElement[] => {
+    const downloaded = deps.isOnShelf(book.id);
+    const busy = downloading !== null;
+    const out: HTMLElement[] = [];
+    if (downloaded && !busy) {
+      out.push(
+        el(
+          'button',
+          {
+            class: 'btn primary',
+            type: 'button',
+            id: 'book-read',
+            onclick: () => {
+              controller.abort();
+              handle.close();
+              deps.onOpenLocal(book.id);
+            },
+          },
+          deps.hasProgress(book.id) ? '继续阅读' : '开始阅读',
+        ),
+      );
+    }
+    out.push(
+      el(
+        'button',
+        {
+          class: downloaded ? 'btn' : 'btn primary',
+          type: 'button',
+          id: 'book-download',
+          disabled: busy,
+          onclick: () => void startDownload(),
+        },
+        busy ? '下载中…' : downloaded ? '重新下载（更新）' : '下载整本',
+      ),
+    );
+    if (busy) {
+      out.push(el('button', { class: 'btn ghost', type: 'button', onclick: () => downloading?.abort() }, '取消'));
+    } else if (downloaded) {
+      out.push(el('button', { class: 'btn ghost danger', type: 'button', onclick: () => { deps.onRemove(book.id); render(); } }, '移出书架'));
+    }
+    return out;
+  };
 
   const render = () => {
     clear(body);
-    const onShelf = deps.library.has(book.id);
-    const meta = [book.author, book.category, 'status' in book ? book.status : undefined, sourceNameOf(book.id)]
+    const onShelf = deps.isOnShelf(book.id);
+    const meta = [
+      book.author,
+      book.category,
+      'status' in book ? book.status : undefined,
+      'size' in book ? book.size : undefined,
+      sourceNameOf(book.id),
+    ]
       .filter(Boolean)
       .join(' · ');
     const intro = book.intro;
     introNote = el('p', { class: 'book-intro', text: intro || '正在获取简介…' });
+    statusEl = downloadMode
+      ? el('p', {
+          class: 'book-progress download-status',
+          role: 'status',
+          'aria-live': 'polite',
+          text:
+            statusText ||
+            (onShelf
+              ? '已下载到本机，可离线阅读'
+              : `该书源需整本下载后阅读：使用站方提供的 TXT${estimateDownload(book)}，下载后可离线阅读`),
+        })
+      : null;
     body.append(
       el(
         'div',
@@ -291,35 +379,41 @@ export function openBookSheet(
         ),
       ),
       introNote,
+      ...(statusEl ? [statusEl] : []),
       el(
         'div',
         { class: 'home-actions' },
-        el(
-          'button',
-          {
-            class: 'btn primary',
-            type: 'button',
-            id: 'book-read',
-            onclick: () => {
-              controller.abort();
-              handle.close();
-              deps.onRead(book);
-            },
-          },
-          deps.hasProgress(book.id) ? '继续阅读' : '开始阅读',
-        ),
-        onShelf
-          ? el('button', { class: 'btn ghost danger', type: 'button', onclick: () => { deps.onRemove(book.id); render(); } }, '移出书架')
-          : el('button', { class: 'btn', type: 'button', id: 'book-add', onclick: () => { deps.onAdd(book); render(); } }, '加入书架'),
+        ...(downloadMode
+          ? downloadActions()
+          : [
+              el(
+                'button',
+                {
+                  class: 'btn primary',
+                  type: 'button',
+                  id: 'book-read',
+                  onclick: () => {
+                    controller.abort();
+                    handle.close();
+                    deps.onRead(book);
+                  },
+                },
+                deps.hasProgress(book.id) ? '继续阅读' : '开始阅读',
+              ),
+              onShelf
+                ? el('button', { class: 'btn ghost danger', type: 'button', onclick: () => { deps.onRemove(book.id); render(); } }, '移出书架')
+                : el('button', { class: 'btn', type: 'button', id: 'book-add', onclick: () => { deps.onAdd(book); render(); } }, '加入书架'),
+            ]),
       ),
     );
   };
   render();
 
-  void apiGet<TocRangeResult>(`/api/toc?book=${encodeURIComponent(book.id)}&from=1&to=2`, {
+  const tocPromise = apiGet<TocRangeResult>(`/api/toc?book=${encodeURIComponent(book.id)}&from=1&to=2`, {
     signal: controller.signal,
     retries: 1,
-  })
+  });
+  void tocPromise
     .then((res) => {
       if (controller.signal.aborted || !res.book) {
         if (introNote && !book.intro) introNote.textContent = '暂无简介';
@@ -333,6 +427,63 @@ export function openBookSheet(
     .catch(() => {
       if (introNote && !book.intro) introNote.textContent = '简介获取失败（不影响阅读）';
     });
+
+  const startDownload = async (): Promise<void> => {
+    if (downloading) return;
+    const ctl = new AbortController();
+    downloading = ctl;
+    statusText = '正在获取目录…';
+    render();
+    try {
+      // 目录用于对齐章节号与标题；取不到时按 TXT 标题切分
+      const toc = await tocPromise.catch(() => null);
+      const catalog = toc?.pages.find((p) => p.page === 1)?.entries ?? [];
+      const result = await downloadSourceBook(book, catalog, {
+        signal: ctl.signal,
+        onProgress: (p) => setStatus(describeProgress(p)),
+      });
+      deps.onDownloaded(result.meta);
+      const notes = [
+        result.missing > 0 ? `目录中有 ${result.missing} 章在 TXT 里缺失` : '',
+        result.aligned ? '' : '未能与目录对齐，章节按 TXT 标题切分',
+      ].filter(Boolean);
+      statusText = `已下载 ${result.meta.chapters} 章，可离线阅读${notes.length ? `（${notes.join('；')}）` : ''}`;
+    } catch (err) {
+      const aborted = ctl.signal.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      statusText = aborted ? '已取消下载' : `下载失败：${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      downloading = null;
+      if (!controller.signal.aborted || deps.isOnShelf(book.id)) render();
+    }
+  };
+}
+
+/** 按字数估算压缩包体积（实测约每百万字 0.9MB）；省流量模式时提醒 */
+function estimateDownload(book: BookSummary | BookInfo): string {
+  const raw = 'size' in book ? book.size : undefined;
+  const wan = raw ? Number.parseFloat(raw.replace(/[^\d.]/g, '')) : Number.NaN;
+  const parts: string[] = [];
+  if (Number.isFinite(wan) && /万字/.test(raw ?? '')) {
+    const mb = (wan / 100) * 0.9;
+    parts.push(`约 ${mb < 1 ? '1' : Math.round(mb)} MB`);
+  }
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  if (conn?.saveData) parts.push('当前为省流量模式');
+  return parts.length ? `（${parts.join('，')}）` : '';
+}
+
+function describeProgress(p: DownloadProgress): string {
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+  switch (p.phase) {
+    case 'download':
+      return `正在下载 ${mb(p.done)}${p.total ? ` / ${mb(p.total)}` : ''} MB…`;
+    case 'unzip':
+      return '正在解压…';
+    case 'split':
+      return '正在分章…';
+    case 'save':
+      return `正在保存 ${p.done} / ${p.total} 章…`;
+  }
 }
 
 function stripUndefined<T extends object>(obj: T): Partial<T> {

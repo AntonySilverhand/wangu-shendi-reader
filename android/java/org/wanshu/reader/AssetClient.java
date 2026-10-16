@@ -17,6 +17,7 @@ import java.util.Map;
  *  - 所有资源请求由 shouldInterceptRequest 从 APK assets 提供；
  *  - /native/source 走受限书源代理（只允许万书阁/69书吧上校验过的书号路径与站内搜索）；
  *  - /native/cover?book= 取封面图（只允许书号拼出的封面路径）；
+ *  - /native/download?book= 取整本 TXT 压缩包（只允许书号拼出的下载地址）；
  *  - 任何 reader.local 之外的请求一律拒绝（不开放任意 URL 代理）。
  */
 public final class AssetClient extends WebViewClient {
@@ -85,6 +86,9 @@ public final class AssetClient extends WebViewClient {
     if (path.equals("/native/cover")) {
       return handleCover(url.getQuery());
     }
+    if (path.equals("/native/download")) {
+      return handleDownload(url.getQuery());
+    }
     try {
       byte[] data = provider.open(path);
       if (data == null) {
@@ -127,6 +131,19 @@ public final class AssetClient extends WebViewClient {
     headers.put("Content-Type", mime);
     headers.put("Cache-Control", "max-age=604800");
     return new WebResourceResponse(mime, null, 200, "OK", headers,
+        new ByteArrayInputStream(result.body));
+  }
+
+  private WebResourceResponse handleDownload(String query) {
+    SourceResult result = proxy.fetchDownload(queryParam(query, "book"));
+    if (result.status != 200) {
+      return response("text/plain", result.status, result.errorMessage);
+    }
+    Map<String, String> headers = new java.util.HashMap<>();
+    headers.put("Content-Type", "application/zip");
+    headers.put("Content-Length", String.valueOf(result.body.length));
+    headers.put("Cache-Control", "no-store");
+    return new WebResourceResponse("application/zip", null, 200, "OK", headers,
         new ByteArrayInputStream(result.body));
   }
 

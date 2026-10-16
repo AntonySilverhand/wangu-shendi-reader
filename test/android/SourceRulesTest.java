@@ -84,6 +84,31 @@ public final class SourceRulesTest {
     check(SourceRules.isShubaBookId("69shuba-51254"), true, "69 id");
     check(SourceRules.isShubaBookId("69shuba-"), false, "69 empty id");
     check(SourceRules.isShubaBookId("51254"), false, "69 id needs prefix");
+    // 爱下电子书：书页 + GET 搜索 + 整本压缩包；章节页（有安全验证）不放行
+    check(SourceRules.allowedPage(u("https://ixdzs8.com/read/137695/")), true, "ix book page");
+    check(SourceRules.allowedPage(u("https://www.ixdzs8.com/read/137695/")), true, "ix www");
+    check(SourceRules.allowedPage(u("https://ixdzs8.com/read/137695/p1.html")), false, "ix chapter page blocked");
+    check(SourceRules.allowedPage(u("https://ixdzs8.com/read/137695/?challenge=x")), false, "ix query");
+    check(SourceRules.allowedPage(u("https://ixdzs8.com/read/137695")), false, "ix no slash");
+    check(SourceRules.allowedPage(u("https://ixdzs8.com/bsearch?q=a")), false, "ix search is not a page");
+    check(SourceRules.allowedPage(u("https://ixdzs.tw/read/137695/")), false, "ix mirror not proxied");
+    check(SourceRules.allowedGetSearch(u("https://ixdzs8.com/bsearch?q=%E4%B8%87%E5%8F%A4")), true, "ix search");
+    check(SourceRules.allowedGetSearch(u("https://ixdzs8.com/bsearch?q=")), false, "ix empty search");
+    check(SourceRules.allowedGetSearch(u("https://ixdzs8.com/bsearch?q=a&page=2")), false, "ix search extra param");
+    check(SourceRules.allowedGetSearch(u("https://ixdzs8.com/bsearch")), false, "ix search no query");
+    check(SourceRules.allowedGetSearch(u("https://wanshuge.org/bsearch?q=a")), false, "ix search other host");
+    check("https://down7.ixdzs8.com/137695.zip".equals(SourceRules.downloadUrl("ixdzs-137695")), true, "ix download url");
+    check(SourceRules.downloadUrl("36780") == null, true, "download only ixdzs");
+    check(SourceRules.downloadUrl("ixdzs-0") == null, true, "ix bad id");
+    check(SourceRules.allowedDownload(u("https://down7.ixdzs8.com/137695.zip")), true, "ix zip");
+    check(SourceRules.allowedDownload(u("https://down7.ixdzs8.com/137695.zip?x=1")), false, "ix zip query");
+    check(SourceRules.allowedDownload(u("https://down7.ixdzs8.com/a/137695.zip")), false, "ix zip path");
+    check(SourceRules.allowedDownload(u("https://down8.ixdzs8.com/137695.zip")), false, "ix zip host");
+    check(SourceRules.allowedDownload(u("https://down7.ixdzs8.com/137695.txt")), false, "ix not zip");
+    check(SourceRules.isIxdzsBookId("ixdzs-137695"), true, "ix id");
+    check(SourceRules.isIxdzsBookId("ixdzs-x"), false, "ix bad id fmt");
+    check(SourceRules.coverUrl("ixdzs-137695") == null, true, "ix has no id-based cover");
+
     // 字符集：Content-Type 优先，其次 meta，未知标签按 utf-8
     check("gbk".equals(SourceRules.charsetOf("text/html; charset=GBK", null)), true, "charset header");
     check("gbk".equals(SourceRules.charsetOf("text/html", "<html><head><meta charset=\"gbk\">".getBytes())), true, "charset meta");

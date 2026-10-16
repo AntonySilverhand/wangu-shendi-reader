@@ -4,14 +4,18 @@
  */
 import type { TocEntry } from '../../shared/source.ts';
 import { normalizeTitle } from '../../shared/source.ts';
-import { putChapter, putToc, listChapters, type ChapterRecord } from './db.ts';
+import { deleteChapterIds, listChapterIds, listChapters, putChapters, putToc, type ChapterRecord } from './db.ts';
 
 export interface LocalBookMeta {
+  /** local-xxx（TXT 导入）或书源整本下载的书号（如 ixdzs-137695，重新下载时保持不变） */
   id: string;
   title: string;
   chapters: number;
   bytes: number;
   importedAt: number;
+  author?: string;
+  /** 整本下载来源的书源 id */
+  source?: string;
 }
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
@@ -77,48 +81,74 @@ export interface ImportResult {
   bytes: number;
 }
 
-export async function importTxtFile(
-  file: File,
-  onProgress?: (done: number, total: number) => void,
-): Promise<ImportResult> {
-  const text = await file.text();
-  const bytes = new TextEncoder().encode(text).length;
-  const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 40) || '本地导入';
-  const bookId = `local-${Date.now().toString(36)}`;
-  const rawChapters = splitTxt(text);
-  if (rawChapters.length === 0) throw new Error('没有识别到任何章节');
+export interface LocalChapterInput {
+  id: string;
+  title: string;
+  paragraphs: string[];
+}
 
+export interface LocalBookInput {
+  bookId: string;
+  title: string;
+  author?: string;
+  /** 来自书源整本下载时的书源 id（如 ixdzs），本地 TXT 导入为空 */
+  source?: string;
+  chapters: LocalChapterInput[];
+}
+
+/** 每批写入的章节数（一个 IndexedDB 事务） */
+const SAVE_BATCH = 200;
+
+/**
+ * 把整本书写入 IndexedDB 并登记为本地书（TXT 导入与书源整本下载共用）。
+ * 同一 bookId 再次保存（重新下载/更新）时：先覆盖写入新章节，再删除新版本里没有的旧章节，
+ * 最后写目录与书籍记录——中途取消时旧书仍可读。
+ */
+export async function saveLocalBook(
+  input: LocalBookInput,
+  onProgress?: (done: number, total: number) => void,
+): Promise<LocalBookMeta> {
+  const { bookId, chapters } = input;
   const entries: TocEntry[] = [];
+  const encoder = new TextEncoder();
   let bytesWritten = 0;
-  for (let i = 0; i < rawChapters.length; i++) {
-    const chap = rawChapters[i]!;
-    const chapterId = String(i + 1);
-    const paragraphs = chap.lines.filter((l) => l.length > 0);
-    const info = normalizeTitle(chap.title);
-    entries.push({
-      id: chapterId,
-      title: chap.title,
-      displayTitle: info.displayTitle,
-      number: info.number,
-      extra: info.extra,
-    });
-    const joined = paragraphs.join('');
-    bytesWritten += new TextEncoder().encode(joined).length;
-    const record: ChapterRecord = {
-      key: `${bookId}:${chapterId}`,
-      bookId,
-      chapterId,
-      title: chap.title,
-      paragraphs,
-      charCount: joined.length,
-      source: 'local',
-      fetchedAt: Date.now(),
-      bytes: new TextEncoder().encode(joined).length,
-    };
-    await putChapter(record);
-    onProgress?.(i + 1, rawChapters.length);
-    if ((i + 1) % 40 === 0) await new Promise((r) => setTimeout(r, 0));
+  const now = Date.now();
+  for (let i = 0; i < chapters.length; i += SAVE_BATCH) {
+    const batch: ChapterRecord[] = [];
+    for (const chap of chapters.slice(i, i + SAVE_BATCH)) {
+      const paragraphs = chap.paragraphs.filter((l) => l.length > 0);
+      const info = normalizeTitle(chap.title);
+      entries.push({
+        id: chap.id,
+        title: chap.title,
+        displayTitle: info.displayTitle,
+        number: info.number,
+        extra: info.extra,
+      });
+      const joined = paragraphs.join('');
+      const bytes = encoder.encode(joined).length;
+      bytesWritten += bytes;
+      batch.push({
+        key: `${bookId}:${chap.id}`,
+        bookId,
+        chapterId: chap.id,
+        title: chap.title,
+        paragraphs,
+        charCount: joined.length,
+        source: 'local',
+        fetchedAt: now,
+        bytes,
+      });
+    }
+    await putChapters(batch);
+    onProgress?.(Math.min(i + SAVE_BATCH, chapters.length), chapters.length);
+    await new Promise((r) => setTimeout(r, 0));
   }
+
+  const keep = new Set(entries.map((e) => e.id));
+  const stale = await listChapterIds(bookId).catch(() => new Set<string>());
+  const remove = [...stale].filter((id) => !keep.has(id));
+  if (remove.length > 0) await deleteChapterIds(bookId, remove);
 
   // 目录按固定页大小写入，与在线书结构保持一致
   const pages: Record<string, TocEntry[]> = {};
@@ -130,14 +160,41 @@ export async function importTxtFile(
     bookId,
     pages,
     totalPages: Math.ceil(entries.length / LOCAL_PAGES_PER_CHUNK),
-    updatedAt: Date.now(),
+    updatedAt: now,
   });
+  const meta: LocalBookMeta = {
+    id: bookId,
+    title: input.title.slice(0, 100),
+    chapters: entries.length,
+    bytes: bytesWritten,
+    importedAt: now,
+  };
+  if (input.author) meta.author = input.author.slice(0, 60);
+  if (input.source) meta.source = input.source;
   removeLocalBookMeta(bookId);
-  saveLocalBooks([
-    { id: bookId, title: baseName, chapters: entries.length, bytes: bytesWritten, importedAt: Date.now() },
-    ...listLocalBooks(),
-  ]);
-  return { bookId, title: baseName, chapters: entries.length, bytes };
+  saveLocalBooks([meta, ...listLocalBooks()]);
+  return meta;
+}
+
+export async function importTxtFile(
+  file: File,
+  onProgress?: (done: number, total: number) => void,
+): Promise<ImportResult> {
+  const text = await file.text();
+  const bytes = new TextEncoder().encode(text).length;
+  const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 40) || '本地导入';
+  const bookId = `local-${Date.now().toString(36)}`;
+  const rawChapters = splitTxt(text);
+  if (rawChapters.length === 0) throw new Error('没有识别到任何章节');
+  const meta = await saveLocalBook(
+    {
+      bookId,
+      title: baseName,
+      chapters: rawChapters.map((chap, i) => ({ id: String(i + 1), title: chap.title, paragraphs: chap.lines })),
+    },
+    onProgress,
+  );
+  return { bookId, title: baseName, chapters: meta.chapters, bytes };
 }
 
 /** 把已缓存的章节导出为单个 TXT（按目录顺序） */

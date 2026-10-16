@@ -15,6 +15,8 @@ import {
 import type { PersonalStore } from '../store/personal.ts';
 import type { TocStore } from '../store/toc.ts';
 import { formatBytes, storageStats, clearBookContent, type StorageStats } from '../store/db.ts';
+import { isLocalBookId } from '../store/library.ts';
+import { isDownloadBookId } from '../../shared/sources.ts';
 import type { DownloadManager, DownloadState } from '../store/download.ts';
 import { formatDate } from '../format.ts';
 import { isNativeDisplayAvailable } from '../native-display.ts';
@@ -261,7 +263,14 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(sheetSection('正文缓存（可随时重新获取）', statsBox));
   const clearBtn = el('button', { class: 'btn danger small', type: 'button' }, '清理正文缓存');
   clearBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog('清理全部已缓存正文？书签和阅读进度会保留。');
+    // 本机书（TXT 导入 / 整本下载）的正文不是缓存：清理后无法在线补回
+    const ok = await confirmDialog(
+      isDownloadBookId(deps.bookId)
+        ? '清理这本书的全部正文？清理后需在“搜索书源”中重新下载整本才能阅读；书签和阅读进度会保留。'
+        : isLocalBookId(deps.bookId)
+          ? '清理这本书的全部正文？本地导入的正文无法从书源恢复；书签和阅读进度会保留。'
+          : '清理全部已缓存正文？书签和阅读进度会保留。',
+    );
     if (!ok) return;
     const n = await clearBookContent(deps.bookId);
     showToast(`已清理 ${n} 章缓存`);

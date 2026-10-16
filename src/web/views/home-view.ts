@@ -178,7 +178,7 @@ function shelfSection(deps: HomeDeps): HTMLElement {
           'span',
           { class: 'shelf-info' },
           el('strong', { text: book.title }),
-          el('span', { text: book.local ? '本地导入' : shelfByline(book) }),
+          el('span', { text: book.local ? book.author : shelfByline(book) }),
           el('span', { class: 'shelf-status', text: status }),
         ),
       ),

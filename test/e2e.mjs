@@ -5,6 +5,7 @@
  */
 import { chromium, devices } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { deflateRawSync } from 'node:zlib';
 
 const BASE = process.argv[2] ?? 'http://localhost:8787';
 const PART = process.argv[3] ?? 'all';
@@ -589,6 +590,91 @@ async function main() {
   await sp.screenshot({ path: `${SHOT_DIR}shuba-blocked.png` });
   check('69书吧流程无页面错误', sErrors.length === 0, sErrors.slice(0, 2).join(' | '));
   await sctx.close();
+  }
+  if (runPart(5)) {
+  console.log('\n[16] 爱下电子书：搜索 → 下载整本 → 离线阅读 → 书架（API 与压缩包由 fixture 模拟）');
+  const xctx = await newContext(browser, VIEWPORTS[1]);
+  const xp = await xctx.newPage();
+  const xErrors = [];
+  xp.on('pageerror', (err) => xErrors.push(String(err)));
+  const BOOKX = 'ixdzs-593824';
+  const bookX = { id: BOOKX, title: '测试整本书', author: '测试作者', category: '已完结 · 1.2万字', intro: '用于端到端测试的整本下载书。' };
+  const titlesX = ['第1章 开端', '第2章 转折', '第3章 结局'];
+  const entriesX = titlesX.map((t, i) => ({ id: String(i + 1), title: t, displayTitle: t, number: i + 1, extra: false }));
+  const txt = [
+    '『测试整本书/作者:测试作者』',
+    '『状态:已完结』',
+    '爱下电子书Txt版阅读,下载和分享更多电子书请访问，简体:https://ixdzs8.com',
+    '------章节内容开始-------',
+    ...titlesX.flatMap((t, i) => [t.replace(' ', ''), ...Array.from({ length: 30 }, (_, j) => `\u3000\u3000整本书第 ${i + 1} 章第 ${j + 1} 段。`)]),
+    '=已完结=',
+  ].join('\r\n');
+  const zip = (() => {
+    const name = Buffer.from('测试整本书.txt');
+    const data = Buffer.from(txt, 'utf8');
+    const body = deflateRawSync(data);
+    const local = Buffer.alloc(30 + name.length);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(0x800, 6); local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(body.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26); name.copy(local, 30);
+    const central = Buffer.alloc(46 + name.length);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(0x800, 8); central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(body.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); name.copy(central, 46);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(1, 8); eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(central.length, 12); eocd.writeUInt32LE(local.length + body.length, 16);
+    return Buffer.concat([local, body, central, eocd]);
+  })();
+  const chapterCalls = [];
+  await xp.route('**/api/search*', (route) => route.fulfill({ json: { query: '测试', source: 'ixdzs', results: [bookX] } }));
+  await xp.route(`**/api/toc?book=${BOOKX}*`, (route) =>
+    route.fulfill({ json: { from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: entriesX }], failedPages: [], book: { ...bookX, status: '已完结', size: '1.2万字' } } }),
+  );
+  await xp.route(`**/api/chapter?book=${BOOKX}*`, (route) => {
+    chapterCalls.push(route.request().url());
+    return route.fulfill({ status: 400, json: { error: { code: 'invalid', message: '需要整本下载', retryable: false } } });
+  });
+  await xp.route('https://down7.ixdzs8.com/593824.zip', (route) =>
+    route.fulfill({ status: 200, body: zip, headers: { 'content-type': 'application/zip', 'access-control-allow-origin': '*' } }),
+  );
+
+  await xp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForSelector('#discover-input');
+  await xp.click('.discover-sources button[data-source="ixdzs"]');
+  await xp.fill('#discover-input', '测试');
+  await xp.click('#discover-submit');
+  await xp.waitForSelector(`.discover-item[data-book-id="${BOOKX}"]`, { timeout: 15_000 });
+  check('爱下电子书搜索结果出现', true);
+  await xp.click(`.discover-item[data-book-id="${BOOKX}"]`);
+  await xp.waitForSelector('[data-testid=book-sheet] .download-status:has-text("整本下载")', { timeout: 15_000 });
+  check('详情面板提示需整本下载、没有“加入书架”', (await xp.locator('#book-add').count()) === 0);
+  await xp.click('#book-download');
+  await xp.waitForSelector('[data-testid=book-sheet] .download-status:has-text("已下载 3 章")', { timeout: 30_000 });
+  check('下载整本：解压并按目录切出 3 章', true);
+  await xp.screenshot({ path: `${SHOT_DIR}ixdzs-downloaded.png` });
+  await xp.click('#book-read');
+  await xp.waitForFunction(
+    (id) => location.hash === `#/book/${id}/read/1` && document.querySelectorAll('#chapter-content p').length >= 30,
+    BOOKX,
+    { timeout: 30_000 },
+  );
+  check('打开已下载的书阅读第 1 章', (await xp.locator('#chapter-title').textContent()) === '第1章 开端');
+  check('不显示“本地导入内容”提示', !((await xp.textContent('body')) ?? '').includes('本地导入内容'));
+  await xp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await xp.click('[data-testid=home-btn]', { force: true });
+  await xp.waitForSelector(`.shelf-card[data-book-id="${BOOKX}"]`);
+  check('书架卡片显示作者与书源', ((await xp.locator(`.shelf-card[data-book-id="${BOOKX}"] .shelf-info`).textContent()) ?? '').includes('测试作者 · 爱下电子书'));
+  await xp.reload({ waitUntil: 'domcontentloaded' });
+  await xp.goto(`${BASE}/#/book/${BOOKX}/read/3`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
+  check('重载后从本机读取第 3 章，不请求章节接口', chapterCalls.length === 0, chapterCalls.join(' '));
+  await xp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForSelector('#discover-input');
+  await xp.fill('#discover-input', 'https://ixdzs8.com/read/593824/p2.html');
+  await xp.click('#discover-submit');
+  await xp.waitForFunction(() => location.hash.endsWith('/read/2') && document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
+  check('粘贴已下载书的章节网址直达该章', true);
+  check('爱下电子书流程无页面错误', xErrors.length === 0, xErrors.slice(0, 2).join(' | '));
+  await xctx.close();
   }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
