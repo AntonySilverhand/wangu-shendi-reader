@@ -26,8 +26,8 @@ node test/check-layout.mjs      # 宽屏形态验证（1100/1500 断点）
 npm test                 # 单元测试（vi test）
 npm run typecheck        # tsc --noEmit，必须零错误
 bash tools/reader-server.sh start|stop|restart|status 8787   # 本地生产预览
-bash android/build.sh 0.0.17   # 打 APK（产物 artifacts/wangu-reader-v0.0.17.apk）
-gh release create vX.Y.Z artifacts/*.apk ...   # 发布
+bash android/build.sh 0.0.18   # 本地打 APK（产物 artifacts/wangu-reader-v0.0.18.apk；ANDROID_KEYSTORE 指定签名密钥）
+git tag vX.Y.Z && git push origin vX.Y.Z   # 发布：CI（.github/workflows/release-apk.yml）构建并建 Release
 ```
 
 ## 目录结构
@@ -77,7 +77,7 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 - 改动阅读/缓存/位置逻辑：跑 `node test/verify-delivery.mjs`。
 - 改动布局/主题/交互：跑 E2E 两段（`1` 和 `2`）或至少 `tools/verify.sh`。
 - 改动 Android 壳：跑 `bash tools/test-android-source.sh`，并确认 `bash android/build.sh <ver>` 成功、`aapt dump badging` 的 versionCode/Name 正确。
-- 提交信息写清版本与修复内容；发布用 `gh release create`，APK 作为 asset。
+- 提交信息写清版本与修复内容；发布：先改 `android/AndroidManifest.xml` 的 versionCode/Name，写 `docs/releases/vX.Y.Z.md`（首行为标题），再推送 `vX.Y.Z` 标签，由 CI（启用后）用仓库 secret `ANDROID_KEYSTORE_B64` 中的固定密钥签名并发布。**不要换签名密钥**（换了用户就得卸载重装）。
 
 ## 数据与存储
 
