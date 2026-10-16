@@ -46,6 +46,46 @@ public class TocMergerTest {
         assertNotNull(first.getTitle());
     }
 
+    @Test
+    public void testMisnumberedSameBatchChaptersAreKept() {
+        String[][] items = {
+            {"38623350", "第3403章 甲"},
+            {"38623354", "分节阅读第3404节"},
+            {"38623375", "第3409章 天魔霸枪"},
+            {"38623378", "第三千三百八十九章 又惹祸了"},
+            {"38623395", "第三千四百零二章 进始祖界修为大进"},
+            {"38623396", "分节阅读第3403节"},
+            {"38623397", "第三千四百零四章 时间缓流区"},
+            {"49080100", "分节阅读第3403节"},
+            {"49080101", "第三千四百零四章 时间缓流区"},
+        };
+        List<TocEntry> merged = TocMerger.mergeTocPages(Arrays.asList(entries(items)));
+        String[] ids = new String[merged.size()];
+        for (int i = 0; i < ids.length; i++) ids[i] = merged.get(i).getChapterId();
+        assertEquals(Arrays.asList("38623350", "38623354", "38623375", "38623378", "38623395", "38623396", "38623397"),
+                Arrays.asList(ids));
+    }
+
+    @Test
+    public void testLateTitledReuploadReplacesEarlyPlaceholder() {
+        String[][] items = {
+            {"38626100", "分节阅读第4207节"},
+            {"38626103", "第四千二百零八章 至高组会议"},
+            {"49080153", "第四千二百零七章 某章"},
+            {"49080154", "分节阅读第4208节"},
+        };
+        List<TocEntry> merged = TocMerger.mergeTocPages(Arrays.asList(entries(items)));
+        assertEquals(2, merged.size());
+        assertEquals("49080153", merged.get(0).getChapterId());
+        assertEquals("38626103", merged.get(1).getChapterId());
+    }
+
+    private static List<TocEntry> entries(String[][] items) {
+        List<TocEntry> list = new java.util.ArrayList<TocEntry>(items.length);
+        for (int i = 0; i < items.length; i++) list.add(new TocEntry("36780", items[i][0], items[i][1], i, false, 0));
+        return list;
+    }
+
     private static List<TocEntry> combine(List<TocEntry> a, List<TocEntry> b) {
         List<TocEntry> list = new java.util.ArrayList<TocEntry>(a.size() + b.size());
         list.addAll(a);

@@ -1,0 +1,72 @@
+# 启用方法：把本文件移动到 .github/workflows/release-apk.yml（编码代理的 GitHub App 无 workflows 权限，需仓库主人操作）。
+# 推送 vX.Y.Z 标签 → 构建 Android 壳 APK 并发布 GitHub Release。
+# 签名密钥来自仓库 secret ANDROID_KEYSTORE_B64（keystore 的 base64）；密钥口令可选 secret ANDROID_KEYSTORE_PASS（默认 android）。
+# 必须始终使用同一把密钥，否则用户无法覆盖安装。缺少 secret 时直接失败，绝不临时生成密钥。
+name: Release APK
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck & unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Android build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;34.0.0" "platforms;android-34" >/dev/null
+          echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          echo "AAPT=$BT/aapt" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$BT/zipalign" >> "$GITHUB_ENV"
+          echo "APKSIGNER=$BT/apksigner" >> "$GITHUB_ENV"
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::缺少仓库 secret ANDROID_KEYSTORE_B64（发布签名密钥），拒绝用临时密钥签名"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASS=${KEYSTORE_PASS:-android}" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          grep -q "android:versionName=\"$VERSION\"" android/AndroidManifest.xml \
+            || { echo "::error::AndroidManifest versionName 与标签 $GITHUB_REF_NAME 不一致"; exit 1; }
+          bash android/build.sh "$VERSION"
+          "$AAPT" dump badging "artifacts/wangu-reader-v$VERSION.apk" | head -1
+          "$APKSIGNER" verify --print-certs "artifacts/wangu-reader-v$VERSION.apk" | head -3
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="docs/releases/$GITHUB_REF_NAME.md"
+          TITLE="$GITHUB_REF_NAME"
+          [ -f "$NOTES" ] && TITLE="$(head -1 "$NOTES" | sed 's/^# *//')"
+          ARGS=(--prerelease --title "$TITLE")
+          if [ -f "$NOTES" ]; then ARGS+=(--notes-file <(tail -n +2 "$NOTES")); else ARGS+=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" artifacts/*.apk --target "$GITHUB_SHA" "${ARGS[@]}"

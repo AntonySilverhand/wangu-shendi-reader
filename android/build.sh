@@ -56,11 +56,16 @@ cp build/base.apk build/unsigned.apk
 "$ZIPALIGN" -f 4 build/unsigned.apk build/aligned.apk
 
 echo "[6/6] 签名"
-if [ ! -f debug.keystore ]; then
-  keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey \
-    -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
+# 发布签名：ANDROID_KEYSTORE 指向固定密钥（CI 由仓库 secret 解出）；未指定时用本机 debug.keystore。
+# 换密钥会导致无法覆盖安装，发布版务必用同一把密钥。
+KS="${ANDROID_KEYSTORE:-debug.keystore}"
+KS_PASS="${ANDROID_KEYSTORE_PASS:-android}"
+if [ ! -f "$KS" ]; then
+  if [ -n "${ANDROID_KEYSTORE:-}" ]; then echo "签名密钥不存在：$KS" >&2; exit 1; fi
+  keytool -genkeypair -keystore "$KS" -storepass "$KS_PASS" -alias androiddebugkey \
+    -keypass "$KS_PASS" -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
 fi
-"$APKSIGNER" sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android \
+"$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" \
   --out "$ROOT/$OUT" build/aligned.apk
 cd "$ROOT"
 echo "APK: $OUT ($(du -h "$OUT" | cut -f1))"

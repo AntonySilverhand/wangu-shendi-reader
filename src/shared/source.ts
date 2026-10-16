@@ -637,8 +637,11 @@ const REUPLOAD_ID_GAP = 1_000_000;
  * 合并多页目录（去重、排序、番外归位）：
  *  - 正文按上传顺序（id 递增）排列，与源站“下一章”链接一致。源站章节号多处回退/错号
  *    （例如第3409章之后从“第三千三百八十九章”重新编号），按章节号排序会把两段剧情交错。
- *  - 同号同标题只留最早的一份；同号的“分节阅读第N节”占位让位给有标题的版本（保持占位的位置）。
- *  - 结尾的整批重传（同标题、id 远大于原版、占位标题）丢弃。
+ *  - 同号同标题（含两个同号占位）只留最早的一份。
+ *  - 重传只按 id 跨度判定（正文批次内 id 连续）：同标题且 id 远大于原版、或占位标题的章号
+ *    早在 REUPLOAD_ID_GAP 之前就已发布，视为结尾整批重传丢弃；重传的有标题版本替换早期同号占位。
+ *    同一批次内的同号条目是源站错号的不同章节（如第二段“第三千四百零三章”），必须保留，
+ *    否则阅读时会跳章（宁多勿少）。
  *  - 番外按番外序号排序，附在最后
  */
 export function mergeTocEntries(pages: TocEntry[][]): TocEntry[] {
@@ -651,21 +654,30 @@ export function mergeTocEntries(pages: TocEntry[][]): TocEntry[] {
   const main: TocEntry[] = [];
   const byNumber = new Map<number, number[]>(); // 章节号 → main 下标
   const firstIdByTitle = new Map<string, number>();
-  let maxTitledNumber = 0;
+  const titled: { id: number; number: number }[] = []; // 已收录的有标题条目（id 递增）
+  let farCursor = 0;
+  let farMaxNumber = 0; // id 比当前条目小 REUPLOAD_ID_GAP 以上的有标题条目中的最大章号
   for (const entry of ordered) {
+    const id = Number(entry.id);
+    while (farCursor < titled.length && id - titled[farCursor]!.id > REUPLOAD_ID_GAP) {
+      farMaxNumber = Math.max(farMaxNumber, titled[farCursor]!.number);
+      farCursor++;
+    }
     const number = entry.number ?? 0;
     const rest = restTitle(entry);
     const same = byNumber.get(number) ?? [];
+    if (same.some((i) => restTitle(main[i]!) === rest)) continue;
     if (rest === '') {
-      // 占位标题：已有同号章节，或更大章号早已发布（结尾重传批次）
-      if (same.length > 0 || maxTitledNumber > number) continue;
+      // 占位标题：该章号早已发布（结尾重传批次）
+      if (farMaxNumber >= number) continue;
     } else {
       const firstId = firstIdByTitle.get(rest);
-      if (same.some((i) => restTitle(main[i]!) === rest)) continue;
-      if (firstId !== undefined && Number(entry.id) - firstId > REUPLOAD_ID_GAP) continue;
-      if (firstId === undefined) firstIdByTitle.set(rest, Number(entry.id));
-      maxTitledNumber = Math.max(maxTitledNumber, number);
-      const placeholder = same.find((i) => restTitle(main[i]!) === '');
+      if (firstId !== undefined && id - firstId > REUPLOAD_ID_GAP) continue;
+      if (firstId === undefined) firstIdByTitle.set(rest, id);
+      titled.push({ id, number });
+      const placeholder = same.find(
+        (i) => restTitle(main[i]!) === '' && id - Number(main[i]!.id) > REUPLOAD_ID_GAP,
+      );
       if (placeholder !== undefined) {
         main[placeholder] = entry;
         continue;
