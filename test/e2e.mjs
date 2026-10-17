@@ -480,6 +480,15 @@ async function main() {
   );
   check('开始阅读：地址含书号与章节号', true);
   check('顶栏显示新书书名', (await mp.locator('.topbar-title strong').textContent()) === '测试多书');
+  // 章首点正文收起工具栏：正文上移填补工具栏预留的空白；再显示时退回，标题不被遮挡
+  await mp.evaluate(() => window.__readerApp.reader.toggleBars());
+  await mp.waitForTimeout(700);
+  const collapsed = await mp.evaluate(() => ({ y: Math.round(scrollY), bars: document.getElementById('app').dataset.bars }));
+  check('章首收起工具栏时正文上移填补空白', collapsed.bars === 'hidden' && collapsed.y >= 40, JSON.stringify(collapsed));
+  await mp.evaluate(() => window.__readerApp.reader.toggleBars());
+  await mp.waitForTimeout(700);
+  check('再显示工具栏时正文退回、标题不被遮挡', await mp.evaluate(() =>
+    scrollY === 0 && document.querySelector('#chapter-title').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
   await mp.reload({ waitUntil: 'domcontentloaded' });
   await mp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
   check('重载后仍在该书该章', (await mp.evaluate(() => location.hash)) === '#/book/230580/read/72836268');

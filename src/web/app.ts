@@ -1029,7 +1029,7 @@ export class App {
     if (!isNativeDisplayAvailable()) return;
     const shouldImmersive =
       this.view === 'reader' &&
-      this.settings.get().immersiveReading &&
+      this.settings.get().hideStatusBar &&
       !hasBlockingOverlay() &&
       !(this.layout.current === 'compact' && this.tocView.isOpen()) &&
       !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]') &&

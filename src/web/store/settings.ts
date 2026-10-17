@@ -21,7 +21,12 @@ export interface Settings {
   autoHideBars: boolean;
   prefetch: boolean;
   keepScreenAwake: boolean;
-  immersiveReading: boolean;
+  /**
+   * Android 壳：阅读时隐藏状态栏（导航手势条始终保留）。
+   * 取代旧的 immersiveReading（会同时隐藏手势条，上滑回桌面时容易误拖动正文、顶部留空白、看不到时间），
+   * 换新键名让所有人回到默认显示状态栏。
+   */
+  hideStatusBar: boolean;
 }
 
 export const SETTINGS_KEY = 'reader.settings.v1';
@@ -69,7 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoHideBars: true,
   prefetch: true,
   keepScreenAwake: false,
-  immersiveReading: false,
+  hideStatusBar: false,
 };
 
 export function clamp(n: number, min: number, max: number): number {
@@ -91,7 +96,7 @@ function sanitize(raw: unknown): Settings {
   if (typeof r.autoHideBars === 'boolean') s.autoHideBars = r.autoHideBars;
   if (typeof r.prefetch === 'boolean') s.prefetch = r.prefetch;
   if (typeof r.keepScreenAwake === 'boolean') s.keepScreenAwake = r.keepScreenAwake;
-  if (typeof r.immersiveReading === 'boolean') s.immersiveReading = r.immersiveReading;
+  if (typeof r.hideStatusBar === 'boolean') s.hideStatusBar = r.hideStatusBar;
   return s;
 }
 
