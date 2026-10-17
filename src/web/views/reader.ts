@@ -478,17 +478,22 @@ export class ReaderView {
           { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onToggleBookmark() },
           this.cb.isBookmarked() ? '取消书签' : '加入书签',
         ),
-        el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenDownload() }, '下载'),
-        el(
-          'button',
-          {
-            class: 'btn ghost small',
-            type: 'button',
-            id: 'reload-chapter',
-            onclick: () => this.cb.onRequestRetry(),
-          },
-          '重新获取本章',
-        ),
+        // 本机书（TXT 导入/整本下载）没有可在线重取或下载的内容
+        chapter.record.source === 'local'
+          ? null
+          : el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenDownload() }, '下载'),
+        chapter.record.source === 'local'
+          ? null
+          : el(
+              'button',
+              {
+                class: 'btn ghost small',
+                type: 'button',
+                id: 'reload-chapter',
+                onclick: () => this.cb.onRequestRetry(),
+              },
+              '重新获取本章',
+            ),
       ),
     );
   }

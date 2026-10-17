@@ -2,6 +2,7 @@
 import type { ChapterResult } from '../../shared/source.ts';
 import { getChapter, openDb, putChapter, type ChapterRecord } from './db.ts';
 import { apiGet } from './remote.ts';
+import { isDownloadBookId, isRemoteBookId } from '../../shared/sources.ts';
 
 const inFlight = new Map<string, Promise<ChapterRecord>>();
 const refreshing = new Set<string>();
@@ -105,6 +106,17 @@ export async function loadChapterRecord(
 ): Promise<ChapterRecord> {
   const key = `${bookId}:${chapterId}`;
   if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+  // 本机书（TXT 导入 / 整本下载）的正文只在 IndexedDB：“重试/重新获取本章”也不联网，
+  // 否则会拿到“书号无效/需要整本下载”的错误页盖住正常内容
+  if (!isRemoteBookId(bookId)) {
+    const local = await getChapter(bookId, chapterId);
+    if (local) return local;
+    throw new Error(
+      isDownloadBookId(bookId)
+        ? '这一章不在已下载的内容里，可在“搜索书源”中重新下载整本'
+        : '本地书里没有这一章（可重新导入 TXT）',
+    );
+  }
   if (!opts.force) {
     const cached = await getChapter(bookId, chapterId);
     if (cached) {

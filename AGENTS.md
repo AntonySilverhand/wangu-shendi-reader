@@ -46,6 +46,8 @@ src/web/       app.ts（编排 + 路由）cover.ts（封面）
                store/（settings/personal/library=书架/db/toc/chapter/download/txt/remote/book-download=整本下载）
 android/       WebView 壳：MainActivity（系统返回键先交给网页 window.__onNativeBack：关浮层→回书架，不逐章回退历史）
                + ReaderChromeClient（<input type=file> 的系统文件选择器，导入 TXT/ZIP 依赖它）
+               + NativeFileBridge（导出：WebView 不处理 <a download>/blob:，改为分块写临时文件 → 系统“保存到…”）
+               + NativeDisplayBridge.setKeepScreenOn（WebView 没有 Screen Wake Lock API，用 FLAG_KEEP_SCREEN_ON）
                + AssetClient（https://reader.local 资源拦截）
                + SourceProxy/SourceRules（受限书源代理：页面/搜索/封面/整本压缩包）+ build.sh
 test/          单元测试、真实 HTML fixtures、e2e.mjs、验证脚本
@@ -63,7 +65,10 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛/Cloudflare 人机验证、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许由**校验过的书号/章节号**拼出的路径：万书阁的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`；69书吧的 `/book/{n}.htm`、`/book/{n}/`、`/txt/{n}/{id}`、`POST /modules/article/search.php`（表单仅 `searchkey=…&searchtype=all`）与 `static.69shuba.com` 封面；爱下电子书的书页 `/read/{n}/`、`GET /bsearch?q=` 与整本压缩包 `down7.ixdzs8.com/{n}.zip`（**章节页有 JS 安全验证，不访问、不求解**）。`source.ts`/`source-69shuba.ts` 与 `SourceRules.java` 保持同一白名单；原生 `UrlSafetyValidator` 目前只有万书阁（原生尚未接入 69书吧，接入时同步）。人机验证页一律报 `blocked`（不重试、不求解）。
 8. **保持轻量**：不引入前端框架/网络字体；静态资源体积目标 < 150KB gzip。
 9. **书号即 bookId，书号决定书源**：万书阁书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），69书吧书为 `69shuba-{数字}`，爱下电子书为 `ixdzs-{数字}`（整本下载型：`isRemoteBookId` 为假、`isLocalBookId` 为真，下载后按本地书管理，重新下载保持同一书号以保留进度），本地 TXT 书为 `local-xxx`。判定统一用 `sources.ts` 的 `sourceOfBook`/`isRemoteBookId`，不要在别处手写正则。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。新增书源：加一个适配文件 + 在 `sources.ts` 注册 + 新书号前缀，不要复用纯数字书号。
-10. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
+10. **WebView ≠ 浏览器**：新增依赖浏览器能力的功能（文件选择、下载/导出、Wake Lock、剪贴板、分享、window.open、外链）时，
+    必须同时给 Android 壳接上原生实现，否则 APK 里“点了没反应”。网页侧统一走 `save-file.ts`（导出）、
+    `setNativeKeepScreenOn`（常亮）、`window.__onNativeBack`（返回键）这类适配层；本机书（`isRemoteBookId` 为假）不得发章节网络请求。
+11. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
 
 ## 书源适配速查
 

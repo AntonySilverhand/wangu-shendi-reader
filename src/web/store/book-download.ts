@@ -40,6 +40,8 @@ function zipUrl(bookId: string): string {
 }
 
 async function fetchZip(bookId: string, signal: AbortSignal | undefined, onProgress: (p: DownloadProgress) => void): Promise<Uint8Array> {
+  // Android 壳的原生代理下载完整个压缩包后才返回响应：先报“下载中”，否则界面会一直停在“获取目录”
+  onProgress({ phase: 'download', done: 0, total: 0 });
   const res = await fetch(zipUrl(bookId), { signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
   if (!res.ok) throw new BookDownloadError(`书源下载失败（HTTP ${res.status}）`);
   const total = Number(res.headers.get('content-length') ?? 0) || 0;

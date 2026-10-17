@@ -83,7 +83,8 @@ async function showBars(page) {
 }
 
 async function main() {
-  const browser = await chromium.launch();
+  // 宿主机区域设置为空/C 时 Chromium 无法生成中文下载文件名（会退回“download”）：固定 UTF-8
+  const browser = await chromium.launch({ env: { ...process.env, LANG: process.env.LANG || 'C.UTF-8' } });
   const context = await newContext(browser, VIEWPORTS[1]);
   const page = await context.newPage();
   const consoleErrors = [];
@@ -688,12 +689,68 @@ async function main() {
     ((await xp.locator('.shelf-card.current').textContent()) ?? '').includes('3 章'));
   await xp.click('#continue-reading');
   await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
+  check('本地书章末不显示“重新获取本章”', (await xp.locator('#reload-chapter').count()) === 0);
+  // 强制重取（出错页“重试”同一路径）：本地书只读本机，不联网、不出现错误页
+  await xp.evaluate(() => window.__readerApp.openChapter(window.__readerApp.currentChapterId, { force: true }));
+  await xp.waitForTimeout(500);
+  check('本地书强制重取仍显示正文', (await xp.locator('#chapter-error').count()) === 0 &&
+    (await xp.locator('#chapter-content p').count()) >= 30);
   await xp.locator('#end-home').scrollIntoViewIfNeeded();
   await xp.click('#end-home');
   await xp.waitForSelector('.book-card', { timeout: 10_000 });
   check('章末“返回书架”按钮可回书架', true);
+  // 确认框打开时按返回键：关闭确认框（当作取消），不退出、不残留
+  await xp.click('.shelf-card.current .shelf-remove');
+  await xp.waitForSelector('[role=alertdialog]');
+  check('返回键先关闭确认框', (await xp.evaluate(() => window.__onNativeBack())) === true &&
+    (await xp.locator('[role=alertdialog]').count()) === 0 &&
+    (await xp.locator('.shelf-card[data-book-id^="local-"]').count()) === 1);
+  // 导出个人数据（网页版：浏览器下载）
+  await xp.click('.quick-card:has-text("下载与缓存")');
+  const dl = xp.waitForEvent('download');
+  await xp.click('button:has-text("导出书签与进度")');
+  const file = await dl;
+  check('网页版导出个人数据触发下载', file.suggestedFilename().endsWith('.json'), file.suggestedFilename());
   check('爱下电子书流程无页面错误', xErrors.length === 0, xErrors.slice(0, 2).join(' | '));
   await xctx.close();
+
+  // Android 壳导出：模拟原生 _nativeFileBridge（分块写入 → 系统保存对话框 → 回调）
+  const nctx = await newContext(browser, VIEWPORTS[1]);
+  await nctx.addInitScript(() => {
+    let seq = 0;
+    const sessions = new Map();
+    window.__saveLog = [];
+    window._nativeFileBridge = {
+      beginSave: (name, mime) => { seq++; sessions.set(seq, { name, mime, chunks: [] }); return seq; },
+      appendSave: (token, chunk) => { sessions.get(token)?.chunks.push(chunk); return sessions.has(token); },
+      cancelSave: (token) => { sessions.delete(token); },
+      finishSave: (token) => {
+        const s = sessions.get(token);
+        window.__saveLog.push({ name: s.name, mime: s.mime, text: s.chunks.join(''), chunks: s.chunks.length });
+        const status = window.__nextSaveStatus ?? 'saved';
+        setTimeout(() => window.__onNativeSaved(token, status, status === 'error' ? '磁盘已满' : ''), 50);
+      },
+    };
+  });
+  const np = await nctx.newPage();
+  await np.goto(`${BASE}/#/`, { waitUntil: 'domcontentloaded' });
+  await np.waitForSelector('.quick-card:has-text("下载与缓存")');
+  await np.click('.quick-card:has-text("下载与缓存")');
+  await np.click('button:has-text("导出书签与进度")');
+  await np.waitForFunction(() => (document.body.textContent ?? '').includes('已导出个人数据'), null, { timeout: 10_000 });
+  const saved = await np.evaluate(() => window.__saveLog[0]);
+  let parsed = null;
+  try { parsed = JSON.parse(saved.text); } catch { parsed = null; }
+  check('Android 导出走原生保存（JSON 完整可解析）', saved.mime === 'application/json' && saved.name.endsWith('.json') && parsed !== null);
+  await np.evaluate(() => { window.__nextSaveStatus = 'cancelled'; });
+  await np.click('button:has-text("导出书签与进度")');
+  await np.waitForFunction(() => (document.body.textContent ?? '').includes('已取消导出'), null, { timeout: 10_000 });
+  check('Android 导出：用户取消时提示已取消', true);
+  await np.evaluate(() => { window.__nextSaveStatus = 'error'; });
+  await np.click('button:has-text("导出书签与进度")');
+  await np.waitForFunction(() => (document.body.textContent ?? '').includes('导出失败：磁盘已满'), null, { timeout: 10_000 });
+  check('Android 导出：保存失败时给出原因', true);
+  await nctx.close();
   }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
