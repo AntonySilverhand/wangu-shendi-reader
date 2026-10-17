@@ -435,7 +435,9 @@ async function main() {
   const fakeChapter = (id) => ({
     id,
     title: fakeEntries.find((e) => e.id === id)?.title ?? '章节',
-    paragraphs: Array.from({ length: 30 }, (_, i) => `测试多书 ${id} 的第 ${i + 1} 段正文。`),
+    // 第 5 段后插一条采集站分页提示、第 10 段带网址水印：客户端读取时清洗，不显示
+    paragraphs: Array.from({ length: 30 }, (_, i) => `测试多书 ${id} 的第 ${i + 1} 段正文。${i === 9 ? '【△網www.AiQuxs.】' : ''}`)
+      .flatMap((p, i) => (i === 4 ? [p, '本小章还未完，请点击下一页继续阅读后面精彩内容！'] : [p])),
     prevId: id === '72836269' ? '72836268' : null,
     nextId: id === '72836268' ? '72836269' : null,
     pageCount: 1,
@@ -480,6 +482,10 @@ async function main() {
   );
   check('开始阅读：地址含书号与章节号', true);
   check('顶栏显示新书书名', (await mp.locator('.topbar-title strong').textContent()) === '测试多书');
+  check('线上正文里的分页提示/网址水印不显示', await mp.evaluate(() => {
+    const text = document.querySelector('#chapter-content').textContent;
+    return document.querySelectorAll('#chapter-content p').length === 30 && !/下一页|www|AiQuxs/.test(text) && text.includes('第 10 段正文。');
+  }));
   // 章首点正文收起工具栏：正文上移填补工具栏预留的空白；再显示时退回，标题不被遮挡
   await mp.evaluate(() => window.__readerApp.reader.toggleBars());
   await mp.waitForTimeout(700);
@@ -645,7 +651,11 @@ async function main() {
     '『状态:已完结』',
     '爱下电子书Txt版阅读,下载和分享更多电子书请访问，简体:https://ixdzs8.com',
     '------章节内容开始-------',
-    ...titlesX.flatMap((t, i) => [t.replace(' ', ''), ...Array.from({ length: 30 }, (_, j) => `\u3000\u3000整本书第 ${i + 1} 章第 ${j + 1} 段。`)]),
+    ...titlesX.flatMap((t, i) => [
+      t.replace(' ', ''),
+      ...Array.from({ length: 30 }, (_, j) => `\u3000\u3000整本书第 ${i + 1} 章第 ${j + 1} 段。${j === 11 ? '【△網www.AiQuxs.】' : ''}`)
+        .flatMap((p, j) => (j === 9 ? [p, '\u3000\u3000本小章还未完，请点击下一页继续阅读后面精彩内容！', '\u3000\u3000<!--over-->'] : [p])),
+    ]),
     '=已完结=',
   ].join('\r\n');
   const zip = (() => {
@@ -698,6 +708,10 @@ async function main() {
   );
   check('打开已下载的书阅读第 1 章', (await xp.locator('#chapter-title').textContent()) === '第1章 开端');
   check('不显示“本地导入内容”提示', !((await xp.textContent('body')) ?? '').includes('本地导入内容'));
+  check('整本 TXT 里的分页提示/HTML 残留/水印入库前已去掉', await xp.evaluate(() => {
+    const text = document.querySelector('#chapter-content').textContent;
+    return document.querySelectorAll('#chapter-content p').length === 30 && !/下一页|<!--|www/.test(text);
+  }));
   await xp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
   await xp.click('[data-testid=home-btn]', { force: true });
   await xp.waitForSelector(`.shelf-card[data-book-id="${BOOKX}"]`);
@@ -706,12 +720,30 @@ async function main() {
   await xp.goto(`${BASE}/#/book/${BOOKX}/read/3`, { waitUntil: 'domcontentloaded' });
   await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
   check('重载后从本机读取第 3 章，不请求章节接口', chapterCalls.length === 0, chapterCalls.join(' '));
+  await xp.evaluate((id) => new Promise((resolve, reject) => {
+    const open = indexedDB.open('reader-db');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction('chapters', 'readwrite');
+      const store = tx.objectStore('chapters');
+      const get = store.get(`${id}:2`);
+      get.onsuccess = () => {
+        const rec = get.result;
+        rec.paragraphs = [rec.paragraphs[0], '本小章还未完，请点击下一页继续阅读后面精彩内容！', '<b>如有问题请点击此处反馈给我们</b>', ...rec.paragraphs.slice(1)];
+        store.put(rec);
+      };
+      tx.oncomplete = () => resolve(null);
+      tx.onerror = () => reject(tx.error);
+    };
+  }), BOOKX);
   await xp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
   await xp.waitForSelector('#discover-input');
   await xp.fill('#discover-input', 'https://ixdzs8.com/read/593824/p2.html');
   await xp.click('#discover-submit');
   await xp.waitForFunction(() => location.hash.endsWith('/read/2') && document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
   check('粘贴已下载书的章节网址直达该章', true);
+  check('升级前入库的正文带着广告：读取时清洗（不用重新下载）', await xp.evaluate(() =>
+    document.querySelectorAll('#chapter-content p').length === 30 && !/下一页|反馈/.test(document.querySelector('#chapter-content').textContent)));
   // 系统返回键（Android 壳调用 window.__onNativeBack）：阅读页 → 书架；书架 → 交给系统
   check('返回键：阅读页回书架', (await xp.evaluate(() => window.__onNativeBack())) === true);
   await xp.waitForSelector('.book-card', { timeout: 10_000 });

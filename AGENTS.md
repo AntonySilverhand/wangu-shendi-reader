@@ -38,6 +38,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # 发布：CI（.github/workflows/rel
 ```
 src/shared/    同构：source.ts（万书阁适配 + 上游队列/字符集/人机验证识别）、source-69shuba.ts（69书吧适配）、
                source-ixdzs.ts（爱下电子书：书页/目录/搜索 + 整本 TXT 按目录切章）、zip.ts（最小 ZIP 读取/文本解码）、
+               text-clean.ts（正文清洗：采集站分页提示/广告行/网址水印/HTML 残留）、
                sources.ts（按书号分派书源、封面、粘贴网址解析）、api.ts（/api 路由 + 缓存接口）
 src/server/    Node：dev.ts（静态+API）、middleware.ts、file-cache.ts（磁盘缓存）、vite-plugin.ts
 src/worker/    Cloudflare Worker 入口（Cache API）
@@ -69,6 +70,11 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
     必须同时给 Android 壳接上原生实现，否则 APK 里“点了没反应”。网页侧统一走 `save-file.ts`（导出）、
     `setNativeKeepScreenOn`（常亮）、`window.__onNativeBack`（返回键）这类适配层；本机书（`isRemoteBookId` 为假）不得发章节网络请求。
 11. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
+12. **正文一律过 `cleanParagraphs`**（`src/shared/text-clean.ts`）：采集站会把“本小章还未完，请点击下一页继续阅读后面精彩内容！”、
+    `<!--over-->`、`【△網www.…】`、“看最新章节内容，请下载…”之类混进正文（实测《万古神帝》整本 TXT 有 1796 处分页提示）。
+    书源解析（万书阁在合并分页**之后**）、`saveLocalBook` 入库、`chapter.ts` 读取（旧缓存/升级前导入的书不必重新获取）、导出 TXT 都要过它；
+    新书源同样接上。规则只删短行与带网址/站名的固定写法，作者的话（求票、推荐新书）不动；清洗幂等，读取时清洗所以不升缓存版本。
+    分页提示处只在段末是逗号/冒号时接段（段末是汉字多为作者漏句号，硬接会读不通）。新增规则先用真实整本 TXT 跑一遍、列出删掉的行人工核对。
 
 ## 书源适配速查
 

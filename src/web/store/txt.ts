@@ -5,6 +5,7 @@
 import type { TocEntry } from '../../shared/source.ts';
 import { normalizeTitle } from '../../shared/source.ts';
 import { splitIxdzsTxt } from '../../shared/source-ixdzs.ts';
+import { cleanParagraphs } from '../../shared/text-clean.ts';
 import { decodeTextBytes, extractFirstTxt } from '../../shared/zip.ts';
 import { deleteChapterIds, listChapterIds, listChapters, putChapters, putToc, type ChapterRecord } from './db.ts';
 
@@ -120,7 +121,8 @@ export async function saveLocalBook(
   for (let i = 0; i < chapters.length; i += SAVE_BATCH) {
     const batch: ChapterRecord[] = [];
     for (const chap of chapters.slice(i, i + SAVE_BATCH)) {
-      const paragraphs = chap.paragraphs.filter((l) => l.length > 0);
+      // 去掉采集站混进正文的分页提示/广告/水印（如“本小章还未完，请点击下一页继续阅读后面精彩内容！”）
+      const paragraphs = cleanParagraphs(chap.paragraphs);
       const info = normalizeTitle(chap.title);
       entries.push({
         id: chap.id,
@@ -261,7 +263,8 @@ export async function exportCachedTxt(
   for (const entry of entries) {
     const rec = byId.get(entry.id);
     if (!rec) continue;
-    parts.push(`${entry.displayTitle}\n\n${rec.paragraphs.join('\n')}\n`);
+    // 升级前入库的正文可能还带着站点广告，导出时同样清洗
+    parts.push(`${entry.displayTitle}\n\n${cleanParagraphs(rec.paragraphs).join('\n')}\n`);
     count++;
   }
   return { text: parts.join('\n'), count };

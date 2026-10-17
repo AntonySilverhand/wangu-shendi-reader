@@ -9,6 +9,7 @@
  * 只做几件事：构建受限的书源 URL、解析 HTML、合并分页、站内搜索。所有网络请求都由
  * SITE.origin + 校验过的书号/章节号拼出，调用方无法传入任意 URL（见 buildChapterUrl/tocPath）。
  */
+import { cleanParagraphs, countChars } from './text-clean.ts';
 
 export const SITE = {
   origin: 'https://wanshuge.org',
@@ -1411,15 +1412,17 @@ export async function fetchChapter(
   const first = sorted[0]!;
   const last = sorted[sorted.length - 1]!;
   const title = sorted.map((p) => p.title).find((t) => !/第\d+页/.test(t)) ?? first.title;
+  // 合并分页之后再清洗：分页提示处被截断的半句要和下一页的开头接上
+  const body = cleanParagraphs(paragraphs);
 
   const result: ChapterResult = {
     id,
     title,
-    paragraphs,
+    paragraphs: body,
     prevId: first.prevChapterId,
     nextId: last.nextChapterId ?? first.nextChapterId,
     pageCount: sorted.length,
-    charCount: paragraphs.reduce((n, p) => n + p.length, 0),
+    charCount: countChars(body),
     complete: terminal && missing.size === 0,
     missingPages: [...missing].sort((a, b) => a - b),
   };
