@@ -23,6 +23,8 @@ interface NativeBridge {
   setTheme(themeName: string, themeColorHex: string): void;
   setImmersive(immersive: boolean): void;
   onPageReady(): void;
+  /** 旧版 APK 没有该方法 */
+  setKeepScreenOn?(on: boolean): void;
 }
 
 declare global {
@@ -50,6 +52,18 @@ export function parseDisplaySnapshot(data: unknown): NativeDisplaySnapshot | nul
   }
 }
 const listeners = new Set<InsetsListener>();
+
+/** Android 壳保持屏幕常亮（窗口标志位）；返回 false 表示不在壳内或旧壳不支持，调用方改用 Wake Lock API */
+export function setNativeKeepScreenOn(on: boolean): boolean {
+  const bridge = typeof window !== 'undefined' ? window._nativeDisplayBridge : undefined;
+  if (!bridge || typeof bridge.setKeepScreenOn !== 'function') return false;
+  try {
+    bridge.setKeepScreenOn(on);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function isNativeDisplayAvailable(): boolean {
   return typeof window !== 'undefined' && Boolean(window._nativeDisplayBridge);

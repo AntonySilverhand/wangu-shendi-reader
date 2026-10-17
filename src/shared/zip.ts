@@ -61,8 +61,15 @@ export function listZipEntries(buf: Uint8Array): ZipEntry[] {
 }
 
 async function inflateRaw(data: Uint8Array, expected: number): Promise<Uint8Array> {
+  let decompressor: DecompressionStream;
+  try {
+    decompressor = new DecompressionStream('deflate-raw');
+  } catch {
+    // Chrome/WebView 103 之前不支持 deflate-raw：给出可操作的提示，而不是英文 TypeError
+    throw new ZipError('当前系统 WebView 版本过旧，无法解压 ZIP；请更新“Android System WebView”，或先把 ZIP 解压后导入 TXT');
+  }
   // 数据来自 fetch 的 ArrayBuffer（非 SharedArrayBuffer），类型断言安全
-  const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(decompressor);
   const reader = stream.getReader();
   const out = new Uint8Array(expected);
   let pos = 0;

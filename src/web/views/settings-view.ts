@@ -17,6 +17,7 @@ import type { TocStore } from '../store/toc.ts';
 import { formatBytes, storageStats, clearBookContent, type StorageStats } from '../store/db.ts';
 import { isLocalBookId } from '../store/library.ts';
 import { TXT_ACCEPT } from '../store/txt.ts';
+import { saveTextFile } from '../save-file.ts';
 import { isDownloadBookId } from '../../shared/sources.ts';
 import type { DownloadManager, DownloadState } from '../store/download.ts';
 import { formatDate } from '../format.ts';
@@ -211,8 +212,8 @@ export function openSettingsSheet(deps: SettingsDeps): SheetHandle {
   );
   if (isNativeDisplayAvailable()) {
     body.appendChild(
-      toggle('沉浸式阅读', '阅读时隐藏系统状态栏与导航栏，边缘轻扫呼出', s.immersiveReading, (v) =>
-        apply({ immersiveReading: v }),
+      toggle('阅读时隐藏状态栏', '默认关闭；开启后不显示顶部时间与电量（从屏幕顶端下滑可临时查看）。底部导航手势条始终保留', s.hideStatusBar, (v) =>
+        apply({ hideStatusBar: v }),
       ),
     );
   }
@@ -233,7 +234,7 @@ export function openSettingsSheet(deps: SettingsDeps): SheetHandle {
       autoHideBars: true,
       prefetch: true,
       keepScreenAwake: false,
-      immersiveReading: false,
+      hideStatusBar: false,
     });
     deps.onLayoutChanged();
     showToast('已恢复默认设置');
@@ -331,16 +332,14 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
       : `⚠ 个人数据写入失败：${deps.personal.storageError ?? '未知原因'}（书签/进度可能无法保存）`,
   });
   const exportPersonalBtn = el('button', { class: 'btn small', type: 'button' }, '导出书签与进度');
-  exportPersonalBtn.addEventListener('click', () => {
+  exportPersonalBtn.addEventListener('click', async () => {
     const json = deps.onExportPersonal();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `阅读数据-${new Date().toISOString().slice(0, 10)}.json` });
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('已导出个人数据');
+    try {
+      const outcome = await saveTextFile(`阅读数据-${new Date().toISOString().slice(0, 10)}.json`, json, 'application/json');
+      showToast(outcome === 'cancelled' ? '已取消导出' : '已导出个人数据');
+    } catch (err) {
+      showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   });
   const importPersonalInput = el('input', {
     type: 'file',

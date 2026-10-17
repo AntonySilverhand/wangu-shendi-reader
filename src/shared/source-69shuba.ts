@@ -33,6 +33,7 @@ import {
   type TocEntry,
   type TocRangeResult,
 } from './source.ts';
+import { cleanParagraphs, countChars } from './text-clean.ts';
 
 export const SHUBA = {
   id: '69shuba',
@@ -365,15 +366,16 @@ export function parseShubaChapter(bookId: string, chapterId: string, html: strin
   if (prevId === chapterId) prevId = null;
   if (nextId === chapterId) nextId = null;
 
+  const body = cleanParagraphs(paragraphs);
   return {
     id: chapterId,
     title: title || `章节 ${chapterId}`,
-    paragraphs,
+    paragraphs: body,
     prevId,
     nextId,
-    pageCount: paragraphs.length > 0 ? 1 : 0,
-    charCount: paragraphs.reduce((n, p) => n + p.length, 0),
-    complete: paragraphs.length > 0 && navFound,
+    pageCount: body.length > 0 ? 1 : 0,
+    charCount: countChars(body),
+    complete: body.length > 0 && navFound,
     missingPages: [],
   };
 }

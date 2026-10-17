@@ -112,9 +112,9 @@ try {
       { timeout: 60_000 },
     );
     const localTitle = await page.locator('#chapter-title').textContent();
-    const meta = await page.locator('.chapter-meta').textContent();
+    const bodyText = (await page.textContent('body')) ?? '';
     check('本地书可阅读', Boolean(localTitle?.includes('起点')), localTitle ?? '');
-    check('标记为本地导入', Boolean(meta?.includes('本地导入')), meta?.trim() ?? '');
+    check('不显示“本地导入内容”提示', !bodyText.includes('本地导入内容'));
     await page.evaluate(() => window.__readerApp?.reader.showBars());
     await page.keyboard.press('ArrowRight');
     await page.waitForFunction(

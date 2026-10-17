@@ -96,21 +96,45 @@ export class ReaderView {
   }
 
   toggleBars(): void {
-    this.barsHidden = !this.barsHidden;
-    document.getElementById('app')?.setAttribute('data-bars', this.barsHidden ? 'hidden' : 'shown');
+    if (this.barsHidden) this.showBars();
+    else this.hideBars(true);
   }
 
   showBars(): void {
     if (!this.barsHidden) return;
     this.barsHidden = false;
     document.getElementById('app')?.setAttribute('data-bars', 'shown');
+    // 章首：工具栏收起时正文上移填补了它的位置，再显示时退回，避免标题被工具栏盖住
+    const reserved = this.topbarReserve();
+    if (reserved > 0 && window.scrollY > 0 && window.scrollY <= reserved + 1) {
+      this.programmaticScrollAt = Date.now();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 
-  private hideBars(): void {
-    if (this.barsHidden || this.searchOpen) return;
+  private hideBars(byTap = false): void {
+    if (this.barsHidden || (this.searchOpen && !byTap)) return;
     this.barsHidden = true;
     document.getElementById('app')?.setAttribute('data-bars', 'hidden');
+    // 章首：正文顶部给工具栏预留了一段空间；工具栏收起时让正文上移这一段，不留空白
+    //（只改滚动位置不改布局：读到章节中间时显示/隐藏工具栏，正文都不会跳动）
+    const reserved = this.topbarReserve();
+    if (reserved > 0 && window.scrollY < reserved) {
+      this.programmaticScrollAt = Date.now();
+      window.scrollTo({ top: reserved, behavior: 'smooth' });
+    }
   }
+
+  /** 正文顶部为工具栏预留的高度（不含状态栏安全区）；工具栏不是浮层时为 0 */
+  private topbarReserve(): number {
+    const bar = document.querySelector<HTMLElement>('.topbar');
+    if (!bar || getComputedStyle(bar).position !== 'fixed') return 0;
+    const height = bar.getBoundingClientRect().height - parseFloat(getComputedStyle(bar).paddingTop || '0');
+    return Number.isFinite(height) && height > 0 ? Math.round(height) : 0;
+  }
+
+  /** 上面两处程序滚动期间不触发“滚动方向 → 显示/隐藏工具栏” */
+  private programmaticScrollAt = 0;
 
   private scrollIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -130,8 +154,11 @@ export class ReaderView {
   private lastRenderAt = 0;
 
   onScrollDelta(): void {
-    // 切章/恢复位置会引发一次滚动，忽略短时间内的自动滚动
-    if (Date.now() - this.lastRenderAt < 400) return;
+    // 切章/恢复位置/章首收起工具栏会引发滚动，忽略短时间内的自动滚动
+    if (Date.now() - this.lastRenderAt < 400 || Date.now() - this.programmaticScrollAt < 500) {
+      this.lastScrollY = window.scrollY;
+      return;
+    }
     const y = window.scrollY;
     const delta = y - this.lastScrollY;
     this.lastScrollY = y;
@@ -400,12 +427,8 @@ export class ReaderView {
     this.bannerEl.hidden = true;
     this.titleEl.textContent = chapterLabel(entry, record.title) || record.title;
     clear(this.metaEl);
-    this.metaEl.appendChild(el('span', { text: `${record.paragraphs.length} 段` }));
-    if (record.source !== 'local' && (record.missingPages?.length ?? 0) === 0) {
-      this.metaEl.appendChild(el('span', { text: '源站分页已合并' }));
-    }
+    // 只显示字数；段数、“源站分页已合并”“本地导入”属于内部状态，对读者是噪音
     this.metaEl.appendChild(el('span', { text: `${record.charCount.toLocaleString('zh-CN')} 字` }));
-    if (record.source === 'local') this.metaEl.appendChild(el('span', { text: '本地导入' }));
 
     clear(this.contentEl);
     const fragment = document.createDocumentFragment();
@@ -478,17 +501,22 @@ export class ReaderView {
           { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onToggleBookmark() },
           this.cb.isBookmarked() ? '取消书签' : '加入书签',
         ),
-        el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenDownload() }, '下载'),
-        el(
-          'button',
-          {
-            class: 'btn ghost small',
-            type: 'button',
-            id: 'reload-chapter',
-            onclick: () => this.cb.onRequestRetry(),
-          },
-          '重新获取本章',
-        ),
+        // 本机书（TXT 导入/整本下载）没有可在线重取或下载的内容
+        chapter.record.source === 'local'
+          ? null
+          : el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenDownload() }, '下载'),
+        chapter.record.source === 'local'
+          ? null
+          : el(
+              'button',
+              {
+                class: 'btn ghost small',
+                type: 'button',
+                id: 'reload-chapter',
+                onclick: () => this.cb.onRequestRetry(),
+              },
+              '重新获取本章',
+            ),
       ),
     );
   }

@@ -55,7 +55,9 @@ public final class DisplayHelper {
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      window.setNavigationBarContrastEnforced(false);
+      // 正文延伸到导航栏下面（网页不再铺底部衬底）：手势导航下系统不加衬底，手势条直接叠在内容上；
+      // 三键导航下由系统自动加半透明衬底保证按钮清晰。状态栏衬底由网页（半透明主题色）负责。
+      window.setNavigationBarContrastEnforced(true);
       window.setStatusBarContrastEnforced(false);
     }
   }
@@ -96,6 +98,10 @@ public final class DisplayHelper {
         flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
       }
       decor.setSystemUiVisibility(flags);
+      // API 26–28 只有三键导航且没有系统对比度保护：半透明主题色导航栏，正文隐约透出、按钮清晰
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        window.setNavigationBarColor((color & 0x00ffffff) | 0xcc000000);
+      }
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       View decor = window.getDecorView();
       int flags = decor.getSystemUiVisibility();
@@ -118,29 +124,34 @@ public final class DisplayHelper {
     }
   }
 
+  /**
+   * “阅读时隐藏状态栏”：只隐藏状态栏，导航栏/手势条始终保留。
+   * 隐藏手势条会让“上滑回桌面”先变成唤出系统栏的滑动，正文被一起拖走、阅读位置丢失（用户反馈）。
+   */
   public static void applyImmersive(Activity activity, boolean immersive) {
     Window window = activity.getWindow();
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       WindowInsetsController controller = window.getInsetsController();
       if (controller != null) {
+        controller.show(WindowInsets.Type.navigationBars());
         if (immersive) {
-          controller.hide(WindowInsets.Type.systemBars());
+          controller.hide(WindowInsets.Type.statusBars());
           controller.setSystemBarsBehavior(
               WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         } else {
-          controller.show(WindowInsets.Type.systemBars());
+          controller.show(WindowInsets.Type.statusBars());
         }
       }
     } else {
       View decor = window.getDecorView();
       int flags = decor.getSystemUiVisibility();
-      int immersiveFlags = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-          | View.SYSTEM_UI_FLAG_FULLSCREEN
-          | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+      // 旧版本同样不再使用 HIDE_NAVIGATION（并清掉旧版本可能留下的该标志）
+      flags &= ~View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+      int statusFlags = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN;
       if (immersive) {
-        flags |= immersiveFlags;
+        flags |= statusFlags;
       } else {
-        flags &= ~immersiveFlags;
+        flags &= ~statusFlags;
       }
       decor.setSystemUiVisibility(flags);
     }

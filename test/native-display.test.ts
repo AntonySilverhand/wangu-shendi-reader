@@ -201,3 +201,20 @@ describe('Android Native Display Adapter & Inset Contract', () => {
     expect(mockBridge.setImmersive).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('保持屏幕常亮：Android 壳走原生窗口标志位', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('壳提供 setKeepScreenOn 时调用它并返回 true；旧壳/网页版返回 false（改用 Wake Lock API）', async () => {
+    const { setNativeKeepScreenOn } = await import('../src/web/native-display.ts');
+    const calls: boolean[] = [];
+    vi.stubGlobal('window', { _nativeDisplayBridge: { setKeepScreenOn: (on: boolean) => calls.push(on) } });
+    expect(setNativeKeepScreenOn(true)).toBe(true);
+    expect(setNativeKeepScreenOn(false)).toBe(true);
+    expect(calls).toEqual([true, false]);
+    vi.stubGlobal('window', { _nativeDisplayBridge: { getDisplaySnapshot: () => '{}' } });
+    expect(setNativeKeepScreenOn(true)).toBe(false);
+    vi.stubGlobal('window', {});
+    expect(setNativeKeepScreenOn(true)).toBe(false);
+  });
+});

@@ -11,7 +11,7 @@ import { openSettingsSheet, openDataSheet, openDownloadSheet, openAboutSheet, ty
 import { openBookmarksSheet } from './views/bookmarks-view.ts';
 import { closeActiveSheet, hasActiveSheet } from './ui/sheet.ts';
 import { hasBlockingOverlay, onOverlayChange } from './ui/overlay-state.ts';
-import { showToast, confirmDialog } from './ui/toast.ts';
+import { showToast, confirmDialog, closeActiveDialog } from './ui/toast.ts';
 import { SettingsStore, applySettings } from './store/settings.ts';
 import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } from './native-display.ts';
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
@@ -20,6 +20,8 @@ import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
+import { saveTextFile } from './save-file.ts';
+import { setNativeKeepScreenOn } from './native-display.ts';
 import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
 import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
 import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
@@ -489,6 +491,8 @@ export class App {
 
   private async updateWakeLock(): Promise<void> {
     const want = this.settings.get().keepScreenAwake && this.view === 'reader' && !document.hidden;
+    // Android 壳：WebView 没有 Screen Wake Lock API，改用窗口 FLAG_KEEP_SCREEN_ON
+    if (setNativeKeepScreenOn(want)) return;
     const nav = navigator as Navigator & {
       wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
     };
@@ -505,6 +509,7 @@ export class App {
   }
 
   private async releaseWakeLock(): Promise<void> {
+    setNativeKeepScreenOn(false);
     if (!this.wakeLock) return;
     try {
       await this.wakeLock.release();
@@ -797,10 +802,9 @@ export class App {
     this.reader.renderChapter({ record, entry, prevId, nextId }, { restore: restore !== null });
     this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
-    if (record.source === 'local') {
-      // 书源整本下载的书与在线书一样直接阅读，不提示“本地导入”
-      if (!isDownloadBookId(this.bookId)) this.reader.showBanner('本地导入内容');
-    } else if (record.restricted) {
+    // 章首提示只用于影响阅读的异常（内容不全）；“本地导入”“离线阅读中”之类的状态说明不再显示——
+    // 带边框的提示框像个按钮，用户反馈会误以为是导入入口
+    if (record.restricted) {
       this.reader.showBanner('源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制');
     } else if (record.missingPages && record.missingPages.length > 0) {
       this.reader.showBanner('本章后续内容未取到（源站波动）', [
@@ -809,8 +813,6 @@ export class App {
           onClick: () => void this.openChapter(chapterId, { force: true }),
         },
       ]);
-    } else if (navigator.onLine === false) {
-      this.reader.showBanner('离线阅读中（已缓存章节）');
     }
     this.updateTopbar();
     this.updateBottombar(prevId, nextId);
@@ -1024,7 +1026,7 @@ export class App {
     if (!isNativeDisplayAvailable()) return;
     const shouldImmersive =
       this.view === 'reader' &&
-      this.settings.get().immersiveReading &&
+      this.settings.get().hideStatusBar &&
       !hasBlockingOverlay() &&
       !(this.layout.current === 'compact' && this.tocView.isOpen()) &&
       !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]') &&
@@ -1096,6 +1098,7 @@ export class App {
    * 不按网页历史逐章回退。
    */
   handleBack(): boolean {
+    if (closeActiveDialog()) return true;
     if (closeActiveSheet()) return true;
     if (this.search.isOpen()) {
       this.search.close();
@@ -1118,14 +1121,12 @@ export class App {
       showToast('还没有可导出的缓存章节');
       return;
     }
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `${this.currentBookTitle()}-已缓存-${count}章.txt` });
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast(`已导出 ${count} 章`);
+    try {
+      const outcome = await saveTextFile(`${this.currentBookTitle()}-已缓存-${count}章.txt`, text, 'text/plain');
+      showToast(outcome === 'cancelled' ? '已取消导出' : `已导出 ${count} 章`);
+    } catch (err) {
+      showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /* ---------------------------- 书籍切换 ---------------------------- */

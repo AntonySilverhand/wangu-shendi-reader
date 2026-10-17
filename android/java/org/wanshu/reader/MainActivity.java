@@ -11,11 +11,22 @@ import android.os.Bundle;
 import android.view.ViewGroup;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 单 Activity：固定 https://reader.local/ origin，跨更新保持 Web Storage / IndexedDB。
@@ -29,6 +40,9 @@ public class MainActivity extends Activity {
   private static final String KEY_THEME_NAME = "theme_name";
   private static final String KEY_THEME_COLOR = "theme_color";
   private static final int REQUEST_FILE = 41;
+  private static final int REQUEST_SAVE = 42;
+  /** 导出文件上限（整本 TXT 约 32MB 字节） */
+  private static final long MAX_SAVE_BYTES = 128L * 1024 * 1024;
 
   private WebView webView;
   private DisplayLayout displayHost;
@@ -45,6 +59,15 @@ public class MainActivity extends Activity {
   private ValueCallback<Uri[]> fileCallback;
   /** 正在等网页处理返回键，避免连按时重复询问 */
   private boolean backPending;
+  /** 导出（保存文件）会话：JS 桥线程写入、UI 线程弹窗、后台线程复制，统一用 saveLock 保护 */
+  private final Object saveLock = new Object();
+  private int saveSeq;
+  private int saveToken;
+  private File saveFile;
+  private OutputStream saveOut;
+  private long saveBytes;
+  private String saveName;
+  private String saveMime;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -78,6 +101,7 @@ public class MainActivity extends Activity {
     webView.setWebViewClient(new AssetClient(new AssetProvider(getAssets()), new SourceProxy()));
     webView.setWebChromeClient(new ReaderChromeClient(this));
     webView.addJavascriptInterface(new NativeDisplayBridge(this), "_nativeDisplayBridge");
+    webView.addJavascriptInterface(new NativeFileBridge(this), "_nativeFileBridge");
     // 仅 DEBUG=1 APK 开放 adb DevTools。
     WebView.setWebContentsDebuggingEnabled(
         (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
@@ -238,6 +262,20 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode == REQUEST_SAVE) {
+      int token;
+      synchronized (saveLock) {
+        token = saveToken;
+      }
+      Uri target = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
+      if (target == null) {
+        cancelSave(token);
+        notifySaved(token, "cancelled", "");
+      } else {
+        new Thread(new SaveCopyRunnable(this, token, target), "reader-save").start();
+      }
+      return;
+    }
     if (requestCode == REQUEST_FILE) {
       ValueCallback<Uri[]> callback = fileCallback;
       fileCallback = null;
@@ -269,6 +307,174 @@ public class MainActivity extends Activity {
     if (!handled && !destroyed) super.onBackPressed();
   }
 
+  /* ----------------------------- 保持常亮 ----------------------------- */
+
+  public void onSetKeepScreenOn(boolean on) {
+    runOnUiThread(new KeepScreenOnRunnable(this, on));
+  }
+
+  void applyKeepScreenOn(boolean on) {
+    if (destroyed) return;
+    if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  }
+
+  /* --------------------------- 导出（保存文件） --------------------------- */
+
+  /** 文件名去掉路径分隔符与控制字符，限长；空时给默认名 */
+  private static String safeFileName(String name) {
+    String n = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+    if (n.length() > 80) n = n.substring(n.length() - 80);
+    return n.isEmpty() ? "export.txt" : n;
+  }
+
+  /** 关闭并删除当前临时文件（调用方持有 saveLock） */
+  private void discardSaveLocked() {
+    if (saveOut != null) {
+      try {
+        saveOut.close();
+      } catch (IOException ignored) {
+      }
+      saveOut = null;
+    }
+    if (saveFile != null) {
+      if (!saveFile.delete()) saveFile.deleteOnExit();
+      saveFile = null;
+    }
+    saveBytes = 0;
+  }
+
+  int beginSave(String fileName, String mimeType) {
+    synchronized (saveLock) {
+      discardSaveLocked();
+      File dir = new File(getCacheDir(), "exports");
+      if (!dir.isDirectory() && !dir.mkdirs()) return -1;
+      saveSeq++;
+      File file = new File(dir, "export-" + saveSeq + ".part");
+      try {
+        saveOut = new FileOutputStream(file);
+      } catch (IOException e) {
+        return -1;
+      }
+      saveFile = file;
+      saveToken = saveSeq;
+      saveName = safeFileName(fileName);
+      saveMime = "application/json".equals(mimeType) ? "application/json" : "text/plain";
+      return saveToken;
+    }
+  }
+
+  boolean appendSave(int token, String chunk) {
+    synchronized (saveLock) {
+      if (token != saveToken || saveOut == null || chunk == null) return false;
+      byte[] bytes = chunk.getBytes(StandardCharsets.UTF_8);
+      if (saveBytes + bytes.length > MAX_SAVE_BYTES) {
+        discardSaveLocked();
+        return false;
+      }
+      try {
+        saveOut.write(bytes);
+        saveBytes += bytes.length;
+        return true;
+      } catch (IOException e) {
+        discardSaveLocked();
+        return false;
+      }
+    }
+  }
+
+  void finishSave(int token) {
+    synchronized (saveLock) {
+      if (token != saveToken || saveOut == null) {
+        notifySaved(token, "error", "保存会话已失效，请重试");
+        return;
+      }
+      try {
+        saveOut.close();
+        saveOut = null;
+      } catch (IOException e) {
+        discardSaveLocked();
+        notifySaved(token, "error", "写入临时文件失败");
+        return;
+      }
+    }
+    runOnUiThread(new SavePickerRunnable(this, token));
+  }
+
+  void cancelSave(int token) {
+    synchronized (saveLock) {
+      if (token == saveToken) discardSaveLocked();
+    }
+  }
+
+  void launchSavePicker(int token) {
+    String name;
+    String mime;
+    synchronized (saveLock) {
+      if (destroyed || token != saveToken || saveFile == null) return;
+      name = saveName;
+      mime = saveMime;
+    }
+    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+    intent.addCategory(Intent.CATEGORY_OPENABLE);
+    intent.setType(mime);
+    intent.putExtra(Intent.EXTRA_TITLE, name);
+    try {
+      startActivityForResult(intent, REQUEST_SAVE);
+    } catch (ActivityNotFoundException e) {
+      cancelSave(token);
+      notifySaved(token, "error", "系统没有可用的文件保存器");
+    }
+  }
+
+  /** 后台线程：临时文件 → 用户选择的位置 */
+  void copySaveTo(int token, Uri target) {
+    File file;
+    synchronized (saveLock) {
+      if (token != saveToken || saveFile == null) return;
+      file = saveFile;
+    }
+    String status = "saved";
+    String message = "";
+    InputStream in = null;
+    OutputStream out = null;
+    try {
+      in = new FileInputStream(file);
+      out = getContentResolver().openOutputStream(target);
+      if (out == null) throw new IOException("无法打开目标文件");
+      byte[] buf = new byte[64 * 1024];
+      int n;
+      while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+      out.flush();
+    } catch (Exception e) {
+      status = "error";
+      message = "保存失败：" + e.getMessage();
+    } finally {
+      try {
+        if (in != null) in.close();
+      } catch (IOException ignored) {
+      }
+      try {
+        if (out != null) out.close();
+      } catch (IOException e) {
+        status = "error";
+        message = "保存失败：" + e.getMessage();
+      }
+    }
+    cancelSave(token);
+    notifySaved(token, status, message);
+  }
+
+  void notifySaved(int token, String status, String message) {
+    runOnUiThread(new SaveResultRunnable(this, token, status, message));
+  }
+
+  void deliverSaveResult(int token, String status, String message) {
+    if (destroyed || webView == null) return;
+    webView.evaluateJavascript("window.__onNativeSaved&&window.__onNativeSaved(" + token + ","
+        + JSONObject.quote(status) + "," + JSONObject.quote(message) + ")", null);
+  }
+
   @Override
   protected void onDestroy() {
     destroyed = true;
@@ -276,9 +482,13 @@ public class MainActivity extends Activity {
       fileCallback.onReceiveValue(null);
       fileCallback = null;
     }
+    synchronized (saveLock) {
+      discardSaveLocked();
+    }
     if (displayHost != null) displayHost.removeCallbacks(refreshDisplay);
     if (webView != null) {
       webView.removeJavascriptInterface("_nativeDisplayBridge");
+      webView.removeJavascriptInterface("_nativeFileBridge");
       webView.destroy();
     }
     super.onDestroy();

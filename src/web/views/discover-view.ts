@@ -476,6 +476,7 @@ function describeProgress(p: DownloadProgress): string {
   const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
   switch (p.phase) {
     case 'download':
+      if (p.done === 0 && p.total === 0) return '正在下载整本…';
       return `正在下载 ${mb(p.done)}${p.total ? ` / ${mb(p.total)}` : ''} MB…`;
     case 'unzip':
       return '正在解压…';

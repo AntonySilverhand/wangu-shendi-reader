@@ -235,6 +235,17 @@ describe('69书吧：章节', () => {
     expect(ch.charCount).toBe(ch.paragraphs.join('').length);
   });
 
+  it('采集站分页提示/水印不进正文', () => {
+    const html = page('chapter-30001002.html').replace(
+      '&emsp;&emsp;“拜师。”<br />',
+      '&emsp;&emsp;本小章还未完，请点击下一页继续阅读后面精彩内容！<br />\n&emsp;&emsp;“拜师。”【△網www.AiQuxs.】<br />',
+    );
+    const ch = parseShubaChapter(BOOK, '30001002', html);
+    expect(ch.paragraphs.join('\n')).not.toMatch(/下一页|www/);
+    expect(ch.paragraphs).toContain('“拜师。”');
+    expect(ch.complete).toBe(true);
+  });
+
   it('首章没有上一章、末章没有下一章，仍是完整章节', () => {
     const first = parseShubaChapter(BOOK, '30001001', page('chapter-30001001.html'));
     expect(first.prevId).toBe(null);

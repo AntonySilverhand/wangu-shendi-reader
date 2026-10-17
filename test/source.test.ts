@@ -314,6 +314,25 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
     ]);
   });
 
+  it('合并后清洗：分页提示与网址水印不进正文（线上书源同样处理）', async () => {
+    const encoded = (text: string) =>
+      `<script>document.writeln(qsbs.bb('${Buffer.from(`<p>${text}</p>`).toString('base64')}'));</script>`;
+    const dirty = html('chapter-38621571-p2.html').replace(
+      '<p>请勿开启浏览器阅读模式',
+      `${encoded('本小章还未完，请点击下一页继续阅读后面精彩内容！')}${encoded('最后一句。【△網www.AiQuxs.】')}<p>请勿开启浏览器阅读模式`,
+    );
+    const routes: Record<string, string> = { ...routes2871, '/book/36780/38621571_1.html': dirty };
+    const fetcher = async (input: string): Promise<Response> => {
+      const body = routes[new URL(input).pathname];
+      return new Response(body ?? '', { status: body !== undefined ? 200 : 404 });
+    };
+    const r = await fetchChapter(B, '38621571', { fetcher, ...noRetry });
+    expect(r.complete).toBe(true);
+    expect(r.paragraphs).toContain('最后一句。');
+    expect(r.paragraphs.join('\n')).not.toMatch(/下一页|www|AiQuxs/);
+    expect(r.charCount).toBe(r.paragraphs.reduce((n, p) => n + p.length, 0));
+  });
+
   it('_1 抓取失败：保留已取内容、complete=false、missingPages 记录已知缺口', async () => {
     const r = await fetchChapter(B, '38621571', {
       fetcher: fixtureFetcher(routes2871, ['/book/36780/38621571_1.html']),

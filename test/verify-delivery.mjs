@@ -14,11 +14,12 @@ await page.waitForSelector('#chapter-content p', { timeout: 120000 });
 await page.waitForTimeout(1200);
 let info = await page.evaluate(() => {
   const ps = [...document.querySelectorAll('#chapter-content p')];
-  return { n: ps.length, last: ps.at(-1)?.textContent ?? '', meta: document.querySelector('.chapter-meta')?.textContent ?? '' };
+  const banner = document.querySelector('.chapter .banner');
+  return { n: ps.length, last: ps.at(-1)?.textContent ?? '', banner: banner && !banner.hidden ? banner.textContent ?? '' : '' };
 });
 check('2824 完整 99 段', info.n === 99, `${info.n} 段`);
 check('结尾与源站一致', info.last.includes('彻底安静下来'), info.last.slice(0, 30));
-check('显示“源站分页已合并”', info.meta.includes('源站分页已合并'), info.meta);
+check('完整章节不显示章首提示', info.banner === '', info.banner);
 
 console.log('\n[2] 旧半章缓存：立即显示 + 后台补全（不阻塞）');
 await page.evaluate(() => new Promise((res, rej) => {
