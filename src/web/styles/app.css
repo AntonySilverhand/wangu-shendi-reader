@@ -1614,7 +1614,12 @@ html[data-layout='wide'] .home-recent { grid-column: 1; grid-row: 3; }
 html[data-layout='wide'] .home-shelf { grid-column: 2 / -1; grid-row: 3; }
 
 /* ------------------------------------------------------------------ */
-/* 系统状态栏与导航手势条衬底：阅读中工具栏隐藏时保证系统图标对比度     */
+/* 系统栏衬底（Edge-to-Edge，内容铺满整屏）                             */
+/*  - 状态栏：半透明主题色，内容滚到状态栏下面时淡化可见、时钟图标仍清晰；  */
+/*    所有页面常驻（阅读工具栏显示时被工具栏盖住）。                      */
+/*  - 手势条：不加衬底，内容延伸到手势条下面；三键导航由系统加半透明衬底   */
+/*    （API 29+ 导航栏对比度保护；更早版本为半透明导航栏颜色）。           */
+/*  - 左右（横屏刘海/侧边三键导航）：阅读中工具栏隐藏时不透明。            */
 /* ------------------------------------------------------------------ */
 .system-bar-scrim {
   position: fixed;
@@ -1629,11 +1634,8 @@ html[data-layout='wide'] .home-shelf { grid-column: 2 / -1; grid-row: 3; }
   top: 0;
   height: var(--safe-top);
   background: var(--bg);
-}
-.system-bar-scrim.bottom {
-  bottom: 0;
-  height: var(--safe-bottom);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  opacity: 1;
 }
 .app[data-view="reader"][data-bars="hidden"] ~ .system-bar-scrim {
   opacity: 1;

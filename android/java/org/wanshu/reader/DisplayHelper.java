@@ -55,7 +55,9 @@ public final class DisplayHelper {
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      window.setNavigationBarContrastEnforced(false);
+      // 正文延伸到导航栏下面（网页不再铺底部衬底）：手势导航下系统不加衬底，手势条直接叠在内容上；
+      // 三键导航下由系统自动加半透明衬底保证按钮清晰。状态栏衬底由网页（半透明主题色）负责。
+      window.setNavigationBarContrastEnforced(true);
       window.setStatusBarContrastEnforced(false);
     }
   }
@@ -96,6 +98,10 @@ public final class DisplayHelper {
         flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
       }
       decor.setSystemUiVisibility(flags);
+      // API 26–28 只有三键导航且没有系统对比度保护：半透明主题色导航栏，正文隐约透出、按钮清晰
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        window.setNavigationBarColor((color & 0x00ffffff) | 0xcc000000);
+      }
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       View decor = window.getDecorView();
       int flags = decor.getSystemUiVisibility();

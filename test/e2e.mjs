@@ -489,6 +489,35 @@ async function main() {
   await mp.waitForTimeout(700);
   check('再显示工具栏时正文退回、标题不被遮挡', await mp.evaluate(() =>
     scrollY === 0 && document.querySelector('#chapter-title').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+  check('章首只显示字数、没有状态提示框', await mp.evaluate(() => {
+    const banner = document.querySelector('.chapter .banner');
+    return /^[\d,]+ 字$/.test(document.querySelector('.chapter-meta').textContent.trim()) && (!banner || banner.hidden);
+  }));
+  // Edge-to-Edge：模拟原生安全区；工具栏隐藏后状态栏位置是半透明衬底（正文淡化可见），手势条位置没有衬底
+  const scrims = await mp.evaluate(async () => {
+    const root = document.documentElement;
+    root.style.setProperty('--native-safe-top', '32px');
+    root.style.setProperty('--native-safe-bottom', '24px');
+    window.__readerApp.reader.toggleBars();
+    await new Promise((r) => setTimeout(r, 700));
+    const top = document.querySelector('.system-bar-scrim.top');
+    const style = getComputedStyle(top);
+    const alpha = style.backgroundColor.match(/(?:\/|,)\s*([\d.]+)\)$/);
+    const result = {
+      bars: document.getElementById('app').dataset.bars,
+      topHeight: top.getBoundingClientRect().height,
+      topOpacity: Number(style.opacity),
+      topAlpha: alpha ? Number(alpha[1]) : 1,
+      bottomScrim: document.querySelectorAll('.system-bar-scrim.bottom').length,
+    };
+    window.__readerApp.reader.toggleBars();
+    await new Promise((r) => setTimeout(r, 700));
+    root.style.removeProperty('--native-safe-top');
+    root.style.removeProperty('--native-safe-bottom');
+    return result;
+  });
+  check('状态栏衬底半透明、手势条无衬底', scrims.bars === 'hidden' && scrims.topHeight === 32 && scrims.topOpacity === 1
+    && scrims.topAlpha > 0.5 && scrims.topAlpha < 0.9 && scrims.bottomScrim === 0, JSON.stringify(scrims));
   await mp.reload({ waitUntil: 'domcontentloaded' });
   await mp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
   check('重载后仍在该书该章', (await mp.evaluate(() => location.hash)) === '#/book/230580/read/72836268');

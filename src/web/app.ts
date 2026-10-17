@@ -802,10 +802,9 @@ export class App {
     this.reader.renderChapter({ record, entry, prevId, nextId }, { restore: restore !== null });
     this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
-    if (record.source === 'local') {
-      // 书源整本下载的书与在线书一样直接阅读，不提示“本地导入”
-      if (!isDownloadBookId(this.bookId)) this.reader.showBanner('本地导入内容');
-    } else if (record.restricted) {
+    // 章首提示只用于影响阅读的异常（内容不全）；“本地导入”“离线阅读中”之类的状态说明不再显示——
+    // 带边框的提示框像个按钮，用户反馈会误以为是导入入口
+    if (record.restricted) {
       this.reader.showBanner('源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制');
     } else if (record.missingPages && record.missingPages.length > 0) {
       this.reader.showBanner('本章后续内容未取到（源站波动）', [
@@ -814,8 +813,6 @@ export class App {
           onClick: () => void this.openChapter(chapterId, { force: true }),
         },
       ]);
-    } else if (navigator.onLine === false) {
-      this.reader.showBanner('离线阅读中（已缓存章节）');
     }
     this.updateTopbar();
     this.updateBottombar(prevId, nextId);

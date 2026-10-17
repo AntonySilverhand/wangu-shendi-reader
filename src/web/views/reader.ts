@@ -427,12 +427,8 @@ export class ReaderView {
     this.bannerEl.hidden = true;
     this.titleEl.textContent = chapterLabel(entry, record.title) || record.title;
     clear(this.metaEl);
-    this.metaEl.appendChild(el('span', { text: `${record.paragraphs.length} 段` }));
-    if (record.source !== 'local' && (record.missingPages?.length ?? 0) === 0) {
-      this.metaEl.appendChild(el('span', { text: '源站分页已合并' }));
-    }
+    // 只显示字数；段数、“源站分页已合并”“本地导入”属于内部状态，对读者是噪音
     this.metaEl.appendChild(el('span', { text: `${record.charCount.toLocaleString('zh-CN')} 字` }));
-    if (record.source === 'local') this.metaEl.appendChild(el('span', { text: '本地导入' }));
 
     clear(this.contentEl);
     const fragment = document.createDocumentFragment();
