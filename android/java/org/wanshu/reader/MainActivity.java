@@ -1,13 +1,18 @@
 package org.wanshu.reader;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.view.View;
 import android.view.WindowInsets;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
@@ -23,6 +28,7 @@ public class MainActivity extends Activity {
   private static final String PREFS_NAME = "org.wanshu.reader.display_prefs";
   private static final String KEY_THEME_NAME = "theme_name";
   private static final String KEY_THEME_COLOR = "theme_color";
+  private static final int REQUEST_FILE = 41;
 
   private WebView webView;
   private DisplayLayout displayHost;
@@ -35,6 +41,10 @@ public class MainActivity extends Activity {
   private boolean isImmersive;
   private boolean pageReady;
   private boolean destroyed;
+  /** 网页 &lt;input type=file&gt; 等待中的回调；必须回传（含取消时的 null），否则之后再点不会弹出 */
+  private ValueCallback<Uri[]> fileCallback;
+  /** 正在等网页处理返回键，避免连按时重复询问 */
+  private boolean backPending;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +76,7 @@ public class MainActivity extends Activity {
     s.setJavaScriptCanOpenWindowsAutomatically(false);
     webView.setBackgroundColor(Color.parseColor(currentThemeColor));
     webView.setWebViewClient(new AssetClient(new AssetProvider(getAssets()), new SourceProxy()));
+    webView.setWebChromeClient(new ReaderChromeClient(this));
     webView.addJavascriptInterface(new NativeDisplayBridge(this), "_nativeDisplayBridge");
     // 仅 DEBUG=1 APK 开放 adb DevTools。
     WebView.setWebContentsDebuggingEnabled(
@@ -205,15 +216,66 @@ public class MainActivity extends Activity {
     scheduleDisplayRefresh();
   }
 
+  /**
+   * 打开系统文件选择器（导入 TXT / ZIP）。不按 MIME 过滤：各文件管理器给 .txt 的类型不一，
+   * 网页侧按扩展名与内容识别。
+   */
+  public boolean openFileChooser(ValueCallback<Uri[]> callback) {
+    if (fileCallback != null) fileCallback.onReceiveValue(null);
+    fileCallback = callback;
+    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+    intent.addCategory(Intent.CATEGORY_OPENABLE);
+    intent.setType("*/*");
+    try {
+      startActivityForResult(Intent.createChooser(intent, "选择 TXT 或 ZIP 文件"), REQUEST_FILE);
+      return true;
+    } catch (ActivityNotFoundException e) {
+      fileCallback = null;
+      callback.onReceiveValue(null);
+      return true;
+    }
+  }
+
+  @Override
+  protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode == REQUEST_FILE) {
+      ValueCallback<Uri[]> callback = fileCallback;
+      fileCallback = null;
+      if (callback != null) callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+      return;
+    }
+    super.onActivityResult(requestCode, resultCode, data);
+  }
+
+  /**
+   * 系统返回键：先交给网页（关浮层 → 章内搜索 → 目录 → 回书架），网页不处理（已在书架）才交给系统。
+   * 不再按 WebView 历史逐章回退——每次翻章都会压一条历史，读过几十章后就回不到书架。
+   */
   @Override
   public void onBackPressed() {
-    if (webView != null && webView.canGoBack()) webView.goBack();
-    else super.onBackPressed();
+    if (webView == null || !pageReady) {
+      super.onBackPressed();
+      return;
+    }
+    if (backPending) return;
+    backPending = true;
+    webView.evaluateJavascript(
+        "(function(){try{return window.__onNativeBack?window.__onNativeBack()===true:false}catch(e){return false}})()",
+        new BackResultCallback(this));
+  }
+
+  void onWebBackResult(boolean handled) {
+    backPending = false;
+    if (!handled && !destroyed) super.onBackPressed();
   }
 
   @Override
   protected void onDestroy() {
     destroyed = true;
+    if (fileCallback != null) {
+      fileCallback.onReceiveValue(null);
+      fileCallback = null;
+    }
     if (displayHost != null) displayHost.removeCallbacks(refreshDisplay);
     if (webView != null) {
       webView.removeJavascriptInterface("_nativeDisplayBridge");

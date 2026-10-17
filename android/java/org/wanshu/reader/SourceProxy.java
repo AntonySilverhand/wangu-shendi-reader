@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 final class SourceProxy {
   private static final int MAX_BODY = 4 * 1024 * 1024;
   private static final int MAX_IMAGE = 1024 * 1024;
+  /** 整本 TXT 压缩包上限（与 source-ixdzs.ts 的 IXDZS_MAX_ZIP_BYTES 一致） */
+  private static final int MAX_ZIP = 64 * 1024 * 1024;
 
   /** 目录/章节页（GET）；form 非空时为站内搜索（POST） */
   SourceResult fetch(String rawUrl, String form) {
@@ -20,7 +22,7 @@ final class SourceProxy {
       if (form != null) return post(url, form);
       // 每一跳都先验证，不跟随后再检查（禁止向任意地址发请求）。
       for (int hop = 0; hop < 5; hop++) {
-        if (!SourceRules.allowedPage(url)) return error(403, "forbidden");
+        if (!SourceRules.allowedPage(url) && !SourceRules.allowedGetSearch(url)) return error(403, "forbidden");
         HttpURLConnection conn = open(url, "text/html,application/xhtml+xml");
         try {
           int status = conn.getResponseCode();
@@ -31,8 +33,8 @@ final class SourceProxy {
             continue;
           }
           // 保留 404：章节分页探针依赖它作为终章证据。
-          if (status != 200) return error(status >= 400 && status <= 599 ? status : 502, "upstream HTTP " + status);
-          return new SourceResult(200, read(conn, MAX_BODY), url.toString(), null);
+          if (status != 200) return upstreamError(conn, status);
+          return html(conn, url);
         } finally {
           conn.disconnect();
         }
@@ -43,11 +45,12 @@ final class SourceProxy {
     }
   }
 
-  /** 封面图：只允许 /img/{书号}.jpg，返回图片字节 */
+  /** 封面图：只允许书号拼出的封面路径（万书阁 /img/{书号}.jpg、69书吧 static 图床），返回图片字节 */
   SourceResult fetchCover(String bookId) {
-    if (!SourceRules.isValidBookId(bookId)) return error(400, "bad book");
+    String target = SourceRules.coverUrl(bookId);
+    if (target == null) return error(400, "bad book");
     try {
-      URL url = new URL("https://wanshuge.org/img/" + bookId + ".jpg");
+      URL url = new URL(target);
       if (!SourceRules.allowedCover(url)) return error(403, "forbidden");
       HttpURLConnection conn = open(url, "image/*");
       try {
@@ -64,6 +67,27 @@ final class SourceProxy {
     }
   }
 
+  /** 整本下载（爱下电子书）：只允许书号拼出的压缩包地址，不跟随重定向 */
+  SourceResult fetchDownload(String bookId) {
+    String target = SourceRules.downloadUrl(bookId);
+    if (target == null) return error(400, "bad book");
+    try {
+      URL url = new URL(target);
+      if (!SourceRules.allowedDownload(url)) return error(403, "forbidden");
+      HttpURLConnection conn = open(url, "application/zip,application/octet-stream,*/*");
+      conn.setReadTimeout(60000);
+      try {
+        int status = conn.getResponseCode();
+        if (status != 200) return upstreamError(conn, status);
+        return new SourceResult(200, read(conn, MAX_ZIP), url.toString(), null, "application/zip");
+      } finally {
+        conn.disconnect();
+      }
+    } catch (Exception e) {
+      return error(502, "download failed: " + e.getMessage());
+    }
+  }
+
   private SourceResult post(URL url, String form) throws IOException {
     if (!SourceRules.allowedSearch(url, form)) return error(403, "forbidden");
     HttpURLConnection conn = open(url, "text/html,application/xhtml+xml");
@@ -77,12 +101,34 @@ final class SourceProxy {
         out.write(body);
       }
       int status = conn.getResponseCode();
-      // 搜索不跟随重定向：重定向目标未经白名单验证
-      if (status != 200) return error(status >= 400 && status <= 599 ? status : 502, "upstream HTTP " + status);
-      return new SourceResult(200, read(conn, MAX_BODY), url.toString(), null);
+      // 只有一个结果时 jieqi 搜索会重定向到书籍详情页：目标按页面白名单逐跳验证后以 GET 获取
+      if (status >= 300 && status <= 399) {
+        String location = conn.getHeaderField("Location");
+        if (location == null) return error(502, "redirect without location");
+        URL target = new URL(url, location);
+        if (!SourceRules.allowedPage(target)) return error(403, "forbidden redirect");
+        return fetch(target.toString(), null);
+      }
+      if (status != 200) return upstreamError(conn, status);
+      return html(conn, url);
     } finally {
       conn.disconnect();
     }
+  }
+
+  /** HTML 原始字节原样返回，并带上字符集（69书吧为 GBK），由 JS 按字符集解码 */
+  private static SourceResult html(HttpURLConnection conn, URL url) throws IOException {
+    byte[] body = read(conn, MAX_BODY);
+    String charset = SourceRules.charsetOf(conn.getContentType(), body);
+    return new SourceResult(200, body, url.toString(), null, "text/html; charset=" + charset);
+  }
+
+  /** 人机验证（Cloudflare challenge）带 cf-challenge 标记，JS 侧据此报告 blocked；不尝试绕过 */
+  private static SourceResult upstreamError(HttpURLConnection conn, int status) {
+    if ("challenge".equalsIgnoreCase(conn.getHeaderField("cf-mitigated"))) {
+      return error(403, "cf-challenge");
+    }
+    return error(status >= 400 && status <= 599 ? status : 502, "upstream HTTP " + status);
   }
 
   private static HttpURLConnection open(URL url, String accept) throws IOException {

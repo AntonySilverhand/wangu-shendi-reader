@@ -12,8 +12,8 @@
  *  - status           ：complete / exhausted / loading / partial 四态
  */
 import type { TocEntry } from '../../shared/source.ts';
-import { mergeTocEntries } from '../../shared/source.ts';
 import type { BookInfo, TocRangeResult } from '../../shared/source.ts';
+import { mergeBookToc } from '../../shared/sources.ts';
 import { getToc, putToc } from './db.ts';
 import { apiGet } from './remote.ts';
 import { isAbortError } from './toc-search.ts';
@@ -55,6 +55,8 @@ export class TocStore {
   private inFlight = new Map<string, Promise<void>>();
   loadingPages = new Set<number>();
   failedPages = new Set<number>();
+  /** 最近一次目录加载失败的原因（书源返回的提示，如人机验证），成功后清空 */
+  lastError: string | null = null;
   /** 本地导入书籍：目录只读 IndexedDB，不访问网络 */
   offline = false;
   private initialized = false;
@@ -158,7 +160,7 @@ export class TocStore {
     const pages = [...this.pageEntries.keys()]
       .sort((a, b) => a - b)
       .map((p) => this.pageEntries.get(p)!);
-    const merged = mergeTocEntries(pages);
+    const merged = mergeBookToc(this.bookId, pages);
     this.all = merged;
     this.main = merged.filter((e) => !e.extra);
     this.extras = merged.filter((e) => e.extra);
@@ -221,7 +223,10 @@ export class TocStore {
             this.pageEntries.set(page.page, page.entries);
             this.failedPages.delete(page.page);
           }
-          for (const p of chunk.filter((p) => !this.pageEntries.has(p))) this.failedPages.add(p);
+          if (result.pages.length > 0) this.lastError = null;
+          // 超出真实总页数的页不存在（单页目录：69书吧、≤100 章的书），不算失败
+          for (const p of chunk.filter((p) => !this.pageEntries.has(p) && p <= this.totalPages)) this.failedPages.add(p);
+          for (const p of [...this.failedPages]) if (p > this.totalPages) this.failedPages.delete(p);
           this.rebuild();
           this.schedulePersist();
         } catch (err) {
@@ -229,6 +234,8 @@ export class TocStore {
             // 取消：不记失败，直接上抛
             throw err;
           }
+          // 只保留面向用户的中文提示（如人机验证），内部英文错误不展示
+          this.lastError = err instanceof Error && /[\u4e00-\u9fff]/.test(err.message) ? err.message : null;
           for (const p of chunk) this.failedPages.add(p);
         } finally {
           for (const p of chunk) this.loadingPages.delete(p);
@@ -390,6 +397,7 @@ export class TocStore {
     this.all = [];
     this.idToIndex.clear();
     this.totalPages = TOC_UNKNOWN_TOTAL_PAGES;
+    this.lastError = null;
     this.initialized = false;
     this.emit();
   }

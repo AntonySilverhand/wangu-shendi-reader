@@ -19,9 +19,10 @@ import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
-import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
+import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
 import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
+import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 
@@ -96,6 +97,7 @@ export class App {
       onNavigate: (id) => void this.openChapter(id),
       onPositionChange: (pos) => this.savePosition(pos),
       onRequestRetry: () => this.currentChapterId && void this.openChapter(this.currentChapterId, { force: true }),
+      onGoHome: () => this.goHome(),
     });
     this.tocView = this.createTocView();
     this.discover = new DiscoverView({
@@ -109,10 +111,22 @@ export class App {
         showToast(`已加入书架：${book.title}`);
       },
       onRemove: (bookId) => void this.removeBook(bookId),
-      onQueryChange: (q) => {
-        const target = `#/search?q=${encodeURIComponent(q)}`;
+      onQueryChange: (q, source) => {
+        const target = `#/search?q=${encodeURIComponent(q)}${source === DEFAULT_SOURCE ? '' : `&source=${source}`}`;
         if (location.hash !== target) location.hash = target;
       },
+      onOpenUrl: (bookId, chapterId) => {
+        location.hash = chapterId ? `#/book/${bookId}/read/${chapterId}` : `#/book/${bookId}`;
+      },
+      isOnShelf: (bookId) => this.bookExists(bookId),
+      onDownloaded: (meta) => {
+        this.localBooks = listLocalBooks();
+        showToast(`已下载《${meta.title}》共 ${meta.chapters} 章`);
+        // 正在读的就是这本书：重建目录（章节可能有增减）
+        if (meta.id === this.bookId) void this.activateBook(meta.id);
+        this.discover.refresh();
+      },
+      onOpenLocal: (bookId) => void this.openBook(bookId),
       hasProgress: (bookId) => this.personal.getProgress(bookId) !== null,
     });
     this.library.subscribe(() => {
@@ -153,14 +167,18 @@ export class App {
       local: false,
       sortKey: sortKey(b.id, b.addedAt),
     }));
-    const local: ShelfBook[] = this.localBooks.map((b) => ({
-      id: b.id,
-      title: b.title,
-      author: '本地导入',
-      local: true,
-      sortKey: sortKey(b.id, b.importedAt),
-      note: `${b.chapters} 章 · ${formatTime(b.importedAt)}导入`,
-    }));
+    const local: ShelfBook[] = this.localBooks.map((b) => {
+      const source = sourceNameOf(b.id);
+      return {
+        id: b.id,
+        title: b.title,
+        // 书源整本下载的书：作者 · 书源；TXT 导入：作者 · 本地导入（文件头没有作者时只写本地导入）
+        author: source ? `${b.author || '佚名'} · ${source}` : b.author ? `${b.author} · 本地导入` : '本地导入',
+        local: true,
+        sortKey: sortKey(b.id, b.importedAt),
+        note: `${b.chapters} 章 · ${formatTime(b.importedAt)}${source ? '下载' : '导入'}`,
+      };
+    });
     return [...remote, ...local].sort((a, b) => b.sortKey - a.sortKey);
   }
 
@@ -503,12 +521,12 @@ export class App {
    *  #/book/{bookId}/read/{chapterId}  阅读
    *  #/book/{bookId}/toc               目录
    *  #/book/{bookId}                   切到该书并回书架
-   *  #/search?q=                       书源搜索
+   *  #/search?q=&source=               书源搜索（source 缺省为万书阁）
    *  #/read/{chapterId}、#/toc         旧链接（预置书 / 当前书）
    */
   private async applyRoute(): Promise<void> {
     const hash = location.hash.replace(/^#/, '');
-    const search = hash.match(/^\/search(?:\?q=([^&]*))?$/);
+    const search = hash.match(/^\/search(?:\?q=([^&]*)(?:&source=([a-z0-9]{1,20}))?)?$/);
     if (search) {
       let q: string | null = null;
       try {
@@ -516,7 +534,8 @@ export class App {
       } catch {
         q = null;
       }
-      this.showDiscover(q);
+      const source: SourceId = isSourceId(search[2]) ? search[2] : DEFAULT_SOURCE;
+      this.showDiscover(q, source);
       return;
     }
     const bookRoute = hash.match(/^\/book\/([A-Za-z0-9-]{1,40})(\/read\/(\d{1,12})|\/toc)?\/?$/);
@@ -555,7 +574,7 @@ export class App {
   /** 让 bookId 成为当前书（不改变视图）。远程书不在书架上时以占位信息加入，目录加载后补全。 */
   private async ensureBook(bookId: string): Promise<boolean> {
     if (isRemoteBookId(bookId)) {
-      if (!this.library.has(bookId)) this.library.upsert({ id: bookId, title: `书号 ${bookId}` });
+      if (!this.library.has(bookId)) this.library.upsert({ id: bookId, title: placeholderTitle(bookId) });
     } else if (!isLocalBookId(bookId) || !this.localBooks.some((b) => b.id === bookId)) {
       return false;
     }
@@ -568,7 +587,7 @@ export class App {
     else location.hash = '';
   }
 
-  private showDiscover(query: string | null): void {
+  private showDiscover(query: string | null, source: SourceId = DEFAULT_SOURCE): void {
     this.reader.flushPosition();
     this.chapterController?.abort();
     this.chapterGeneration++;
@@ -576,7 +595,7 @@ export class App {
     this.cancelPrefetch();
     this.tocView.close();
     this.setView('discover');
-    this.discover.show(query);
+    this.discover.show(query, source);
   }
 
   private openDiscover(): void {
@@ -632,13 +651,14 @@ export class App {
   }
 
   private currentBookTitle(): string {
-    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? `书号 ${this.bookId}`;
-    return this.localBooks.find((b) => b.id === this.bookId)?.title ?? '本地书籍';
+    if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.title ?? placeholderTitle(this.bookId);
+    return this.localBooks.find((b) => b.id === this.bookId)?.title ?? (isLocalBookId(this.bookId) ? placeholderTitle(this.bookId) : '本地书籍');
   }
 
   private currentBookAuthor(): string {
     if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.author || '佚名';
-    return '本地导入';
+    if (isDownloadBookId(this.bookId)) return this.localBooks.find((b) => b.id === this.bookId)?.author || '佚名';
+    return this.localBooks.find((b) => b.id === this.bookId)?.author || '本地导入';
   }
 
   /* ---------------------------- 阅读流程 ---------------------------- */
@@ -681,7 +701,7 @@ export class App {
     const offline = navigator.onLine === false;
     this.reader.renderError(
       offline ? '离线状态下无法获取目录。' : '暂时无法从书源获取章节列表。',
-      offline ? '联网后可重试；已下载的章节仍可在目录中打开。' : '可点击重试，或稍后再试。',
+      offline ? '联网后可重试；已下载的章节仍可在目录中打开。' : this.toc.lastError ?? '可点击重试，或稍后再试。',
     );
   }
 
@@ -778,7 +798,8 @@ export class App {
     this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
     if (record.source === 'local') {
-      this.reader.showBanner('本地导入内容');
+      // 书源整本下载的书与在线书一样直接阅读，不提示“本地导入”
+      if (!isDownloadBookId(this.bookId)) this.reader.showBanner('本地导入内容');
     } else if (record.restricted) {
       this.reader.showBanner('源站仅公开本章部分内容（需源站会员），本阅读器不绕过限制');
     } else if (record.missingPages && record.missingPages.length > 0) {
@@ -1042,7 +1063,7 @@ export class App {
   /* ---------------------------- TXT 导入/导出 ---------------------------- */
 
   private pickTxtFile(): void {
-    const input = el('input', { type: 'file', accept: '.txt,text/plain', style: { display: 'none' } }) as HTMLInputElement;
+    const input = el('input', { type: 'file', accept: TXT_ACCEPT, style: { display: 'none' } }) as HTMLInputElement;
     input.addEventListener('change', () => {
       const file = input.files?.[0];
       input.remove();
@@ -1053,11 +1074,42 @@ export class App {
   }
 
   private async handleTxtImport(file: File): Promise<void> {
-    showToast('正在解析 TXT…');
-    const result = await importTxtFile(file);
+    showToast(`正在导入 ${file.name}…`);
+    let result;
+    try {
+      result = await importTxtFile(file, (done, total) => {
+        if (done < total && done % 1000 < 200) showToast(`正在保存 ${done}/${total} 章…`);
+      });
+    } catch (err) {
+      showToast(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     this.localBooks = listLocalBooks();
-    showToast(`已导入《${result.title}》共 ${result.chapters} 章`);
     await this.switchBook(result.bookId);
+    // 切换完成后再提示，避免用户在切换过程中点到旧书
+    showToast(`已导入《${result.title}》共 ${result.chapters} 章`);
+  }
+
+  /**
+   * 系统返回键（Android 壳经 window.__onNativeBack 调用）：
+   * 浮层 → 章内搜索 → 紧凑目录 → 阅读/搜索页回书架；已在书架返回 false 交给系统（退出）。
+   * 不按网页历史逐章回退。
+   */
+  handleBack(): boolean {
+    if (closeActiveSheet()) return true;
+    if (this.search.isOpen()) {
+      this.search.close();
+      return true;
+    }
+    if (this.tocView.isOpen() && (this.layout.current === 'compact' || this.view !== 'reader')) {
+      this.tocView.close();
+      return true;
+    }
+    if (this.view !== 'home') {
+      this.goHome();
+      return true;
+    }
+    return false;
   }
 
   private async handleTxtExport(_from: number, _to: number): Promise<void> {
@@ -1097,7 +1149,10 @@ export class App {
 
   /** 切换到某本书并回书架 */
   private async switchBook(bookId: string): Promise<void> {
+    const hashBefore = location.hash;
     if (bookId !== this.bookId) await this.activateBook(bookId);
+    // 切换（读目录/缓存索引）期间用户已经导航到别处：不要再把他拉回书架
+    if (location.hash !== hashBefore) return;
     if (location.hash === '' || location.hash === '#') this.showHome();
     else location.hash = '';
   }
@@ -1135,7 +1190,9 @@ export class App {
       ? this.localBooks.find((b) => b.id === bookId)?.title
       : this.library.get(bookId)?.title;
     const ok = await confirmDialog(
-      local
+      isDownloadBookId(bookId)
+        ? `移除《${title ?? '本地书'}》？下载的正文将一并删除（可在“搜索书源”中重新下载）；阅读进度和书签保留。`
+        : local
         ? `移除《${title ?? '本地书'}》？导入的正文将一并删除（无法从书源恢复）。`
         : `把《${title ?? bookId}》移出书架？已缓存的正文会删除；阅读进度和书签保留，重新加入后可恢复。`,
     );

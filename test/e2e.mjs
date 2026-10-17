@@ -5,6 +5,7 @@
  */
 import { chromium, devices } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { deflateRawSync } from 'node:zlib';
 
 const BASE = process.argv[2] ?? 'http://localhost:8787';
 const PART = process.argv[3] ?? 'all';
@@ -496,6 +497,203 @@ async function main() {
   check('移出书架后当前书回到预置书', (await mp.locator('.book-card h2').textContent()) === '万古神帝');
   check('多书流程无页面错误', mErrors.length === 0, mErrors.slice(0, 2).join(' | '));
   await mctx.close();
+  }
+  if (runPart(4)) {
+  console.log('\n[15] 69书吧：切换书源 → 搜索 → 详情 → 阅读 → 书架；粘贴网址；人机验证提示（API 由 fixture 模拟）');
+  const sctx = await newContext(browser, VIEWPORTS[1]);
+  const sp = await sctx.newPage();
+  const sErrors = [];
+  sp.on('pageerror', (err) => sErrors.push(String(err)));
+  const BOOK69 = '69shuba-51254';
+  const book69 = { id: BOOK69, title: '测试书名', author: '测试作者', category: '玄幻魔法', status: '连载', intro: '少年持剑出山，一路向北。', latestChapter: '第2章 拜师' };
+  const entries69 = [
+    { id: '30001001', title: '第1章 出山', displayTitle: '第1章 出山', number: 1, extra: false },
+    { id: '30001002', title: '第2章 拜师', displayTitle: '第2章 拜师', number: 2, extra: false },
+    { id: '30001003', title: '第3章 封锁', displayTitle: '第3章 封锁', number: 3, extra: false },
+  ];
+  const chapter69 = (id) => ({
+    id,
+    title: entries69.find((e) => e.id === id)?.title ?? '章节',
+    paragraphs: Array.from({ length: 30 }, (_, i) => `69书吧测试 ${id} 第 ${i + 1} 段。`),
+    prevId: null,
+    nextId: null,
+    pageCount: 1,
+    charCount: 400,
+    complete: true,
+    missingPages: [],
+  });
+  const searchUrls = [];
+  await sp.route('**/api/search*', (route) => {
+    searchUrls.push(route.request().url());
+    return route.fulfill({ json: { query: '测试', source: '69shuba', results: [book69] } });
+  });
+  await sp.route(`**/api/toc?book=${BOOK69}*`, (route) =>
+    route.fulfill({ json: { from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: entries69 }], failedPages: [], book: { ...book69 } } }),
+  );
+  await sp.route(`**/api/chapter?book=${BOOK69}*`, (route) => {
+    const id = new URL(route.request().url()).searchParams.get('id');
+    if (id === '30001003') {
+      return route.fulfill({
+        status: 502,
+        json: { error: { code: 'blocked', message: '书源开启了人机验证（Cloudflare），当前网络无法直接获取，请稍后再试或换个网络', retryable: false } },
+      });
+    }
+    return route.fulfill({ json: chapter69(id) });
+  });
+  await sp.route('**/files/article/image/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await sp.route('**/img/**', (route) => route.fulfill({ status: 404, body: '' }));
+
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.click('.discover-sources button[data-source="69shuba"]');
+  check('书源切换为 69书吧', (await sp.getAttribute('.discover-sources button[data-source="69shuba"]', 'aria-pressed')) === 'true');
+  await sp.fill('#discover-input', '测试');
+  await sp.click('#discover-submit');
+  await sp.waitForSelector(`.discover-item[data-book-id="${BOOK69}"]`, { timeout: 15_000 });
+  check('搜索请求带 source=69shuba', searchUrls.some((u) => new URL(u).searchParams.get('source') === '69shuba'), searchUrls.join(' '));
+  check('地址栏记录书源', (await sp.evaluate(() => location.hash)).includes('&source=69shuba'));
+  await sp.reload({ waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector(`.discover-item[data-book-id="${BOOK69}"]`, { timeout: 15_000 });
+  check('重载后仍在 69书吧 搜索', (await sp.getAttribute('.discover-sources button[data-source="69shuba"]', 'aria-pressed')) === 'true');
+  await sp.screenshot({ path: `${SHOT_DIR}shuba-search.png` });
+  await sp.click(`.discover-item[data-book-id="${BOOK69}"]`);
+  await sp.waitForSelector('[data-testid=book-sheet] .book-intro:has-text("持剑出山")', { timeout: 15_000 });
+  check('详情面板标注书源', ((await sp.locator('[data-testid=book-sheet] .author').textContent()) ?? '').includes('69书吧'));
+  await sp.click('#book-read');
+  await sp.waitForFunction(
+    (id) => location.hash === `#/book/${id}/read/30001001` && document.querySelectorAll('#chapter-content p').length >= 30,
+    BOOK69,
+    { timeout: 30_000 },
+  );
+  check('69书吧的书可阅读', true);
+  // 详情面板关闭动画期间遮罩仍在，会吞掉点击
+  await sp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await sp.click('[data-testid=home-btn]', { force: true });
+  await sp.waitForSelector(`.shelf-card[data-book-id="${BOOK69}"]`);
+  check('书架卡片标注 69书吧', ((await sp.locator(`.shelf-card[data-book-id="${BOOK69}"] .shelf-info`).textContent()) ?? '').includes('69书吧'));
+
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.fill('#discover-input', 'https://www.69shuba.com/book/51254/');
+  await sp.click('#discover-submit');
+  await sp.waitForSelector('[data-testid=book-sheet] h2:has-text("测试书名")', { timeout: 15_000 });
+  check('粘贴书籍网址直接打开详情', true);
+  await sp.keyboard.press('Escape');
+  await sp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await sp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForSelector('#discover-input');
+  await sp.fill('#discover-input', 'https://www.69shuba.com/txt/51254/30001003');
+  await sp.click('#discover-submit');
+  await sp.waitForFunction(() => location.hash.endsWith('/read/30001003'), null, { timeout: 15_000 });
+  await sp.waitForFunction(() => document.body.textContent?.includes('人机验证'), null, { timeout: 15_000 });
+  check('粘贴章节网址直达该章；人机验证给出明确提示', true);
+  await sp.screenshot({ path: `${SHOT_DIR}shuba-blocked.png` });
+  check('69书吧流程无页面错误', sErrors.length === 0, sErrors.slice(0, 2).join(' | '));
+  await sctx.close();
+  }
+  if (runPart(5)) {
+  console.log('\n[16] 爱下电子书：搜索 → 下载整本 → 离线阅读 → 书架（API 与压缩包由 fixture 模拟）');
+  const xctx = await newContext(browser, VIEWPORTS[1]);
+  const xp = await xctx.newPage();
+  const xErrors = [];
+  xp.on('pageerror', (err) => xErrors.push(String(err)));
+  const BOOKX = 'ixdzs-593824';
+  const bookX = { id: BOOKX, title: '测试整本书', author: '测试作者', category: '已完结 · 1.2万字', intro: '用于端到端测试的整本下载书。' };
+  const titlesX = ['第1章 开端', '第2章 转折', '第3章 结局'];
+  const entriesX = titlesX.map((t, i) => ({ id: String(i + 1), title: t, displayTitle: t, number: i + 1, extra: false }));
+  const txt = [
+    '『测试整本书/作者:测试作者』',
+    '『状态:已完结』',
+    '爱下电子书Txt版阅读,下载和分享更多电子书请访问，简体:https://ixdzs8.com',
+    '------章节内容开始-------',
+    ...titlesX.flatMap((t, i) => [t.replace(' ', ''), ...Array.from({ length: 30 }, (_, j) => `\u3000\u3000整本书第 ${i + 1} 章第 ${j + 1} 段。`)]),
+    '=已完结=',
+  ].join('\r\n');
+  const zip = (() => {
+    const name = Buffer.from('测试整本书.txt');
+    const data = Buffer.from(txt, 'utf8');
+    const body = deflateRawSync(data);
+    const local = Buffer.alloc(30 + name.length);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(0x800, 6); local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(body.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26); name.copy(local, 30);
+    const central = Buffer.alloc(46 + name.length);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(0x800, 8); central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(body.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); name.copy(central, 46);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(1, 8); eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(central.length, 12); eocd.writeUInt32LE(local.length + body.length, 16);
+    return Buffer.concat([local, body, central, eocd]);
+  })();
+  const chapterCalls = [];
+  await xp.route('**/api/search*', (route) => route.fulfill({ json: { query: '测试', source: 'ixdzs', results: [bookX] } }));
+  await xp.route(`**/api/toc?book=${BOOKX}*`, (route) =>
+    route.fulfill({ json: { from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: entriesX }], failedPages: [], book: { ...bookX, status: '已完结', size: '1.2万字' } } }),
+  );
+  await xp.route(`**/api/chapter?book=${BOOKX}*`, (route) => {
+    chapterCalls.push(route.request().url());
+    return route.fulfill({ status: 400, json: { error: { code: 'invalid', message: '需要整本下载', retryable: false } } });
+  });
+  await xp.route('https://down7.ixdzs8.com/593824.zip', (route) =>
+    route.fulfill({ status: 200, body: zip, headers: { 'content-type': 'application/zip', 'access-control-allow-origin': '*' } }),
+  );
+
+  await xp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForSelector('#discover-input');
+  await xp.click('.discover-sources button[data-source="ixdzs"]');
+  await xp.fill('#discover-input', '测试');
+  await xp.click('#discover-submit');
+  await xp.waitForSelector(`.discover-item[data-book-id="${BOOKX}"]`, { timeout: 15_000 });
+  check('爱下电子书搜索结果出现', true);
+  await xp.click(`.discover-item[data-book-id="${BOOKX}"]`);
+  await xp.waitForSelector('[data-testid=book-sheet] .download-status:has-text("整本下载")', { timeout: 15_000 });
+  check('详情面板提示需整本下载、没有“加入书架”', (await xp.locator('#book-add').count()) === 0);
+  await xp.click('#book-download');
+  await xp.waitForSelector('[data-testid=book-sheet] .download-status:has-text("已下载 3 章")', { timeout: 30_000 });
+  check('下载整本：解压并按目录切出 3 章', true);
+  await xp.screenshot({ path: `${SHOT_DIR}ixdzs-downloaded.png` });
+  await xp.click('#book-read');
+  await xp.waitForFunction(
+    (id) => location.hash === `#/book/${id}/read/1` && document.querySelectorAll('#chapter-content p').length >= 30,
+    BOOKX,
+    { timeout: 30_000 },
+  );
+  check('打开已下载的书阅读第 1 章', (await xp.locator('#chapter-title').textContent()) === '第1章 开端');
+  check('不显示“本地导入内容”提示', !((await xp.textContent('body')) ?? '').includes('本地导入内容'));
+  await xp.waitForSelector('[data-testid=book-sheet]', { state: 'detached' });
+  await xp.click('[data-testid=home-btn]', { force: true });
+  await xp.waitForSelector(`.shelf-card[data-book-id="${BOOKX}"]`);
+  check('书架卡片显示作者与书源', ((await xp.locator(`.shelf-card[data-book-id="${BOOKX}"] .shelf-info`).textContent()) ?? '').includes('测试作者 · 爱下电子书'));
+  await xp.reload({ waitUntil: 'domcontentloaded' });
+  await xp.goto(`${BASE}/#/book/${BOOKX}/read/3`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 30_000 });
+  check('重载后从本机读取第 3 章，不请求章节接口', chapterCalls.length === 0, chapterCalls.join(' '));
+  await xp.goto(`${BASE}/#/search`, { waitUntil: 'domcontentloaded' });
+  await xp.waitForSelector('#discover-input');
+  await xp.fill('#discover-input', 'https://ixdzs8.com/read/593824/p2.html');
+  await xp.click('#discover-submit');
+  await xp.waitForFunction(() => location.hash.endsWith('/read/2') && document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
+  check('粘贴已下载书的章节网址直达该章', true);
+  // 系统返回键（Android 壳调用 window.__onNativeBack）：阅读页 → 书架；书架 → 交给系统
+  check('返回键：阅读页回书架', (await xp.evaluate(() => window.__onNativeBack())) === true);
+  await xp.waitForSelector('.book-card', { timeout: 10_000 });
+  check('返回键：书架上交给系统退出', (await xp.evaluate(() => window.__onNativeBack())) === false);
+  // 导入 ZIP（站方整本 TXT 压缩包同格式）：文件选择器 accept 含 zip，按文件头取书名/作者
+  const chooser = xp.waitForEvent('filechooser');
+  await xp.click('.quick-card:has-text("导入 TXT")');
+  const fc = await chooser;
+  check('文件选择器接受 TXT 与 ZIP', ((await fc.element().getAttribute('accept')) ?? '').includes('.zip'));
+  await fc.setFiles({ name: 'book.zip', mimeType: 'application/zip', buffer: zip });
+  await xp.waitForSelector('.shelf-card.current[data-book-id^="local-"]', { timeout: 30_000 });
+  check('导入 ZIP：书名取自文件头、3 章', ((await xp.locator('.shelf-card.current').textContent()) ?? '').includes('测试整本书') &&
+    ((await xp.locator('.shelf-card.current').textContent()) ?? '').includes('3 章'));
+  await xp.click('#continue-reading');
+  await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
+  await xp.locator('#end-home').scrollIntoViewIfNeeded();
+  await xp.click('#end-home');
+  await xp.waitForSelector('.book-card', { timeout: 10_000 });
+  check('章末“返回书架”按钮可回书架', true);
+  check('爱下电子书流程无页面错误', xErrors.length === 0, xErrors.slice(0, 2).join(' | '));
+  await xctx.close();
   }
   console.log('\n[13] 控制台错误汇总（主上下文）');
   check('主流程无控制台错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

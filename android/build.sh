@@ -7,10 +7,16 @@ ROOT="$(pwd)"
 SDK="${ANDROID_SDK:-$HOME/android-sdk}"
 BT="$SDK/build-tools/34.0.0"
 AJ="$SDK/platforms/android-34/android.jar"
-AAPT="${AAPT:-/usr/bin/aapt}"          # Debian 原生 arm64 aapt v1
-ZIPALIGN="${ZIPALIGN:-/usr/bin/zipalign}"
-APKSIGNER="${APKSIGNER:-/usr/bin/apksigner}"
+# aapt/zipalign/apksigner：优先系统软件包（Debian arm64 原生，SDK 里的是 x86_64 二进制），
+# 没有时用 SDK build-tools（x86_64，tools/setup-android-sdk.sh 安装）
+tool() { if [ -x "/usr/bin/$1" ]; then echo "/usr/bin/$1"; else echo "$BT/$1"; fi; }
+AAPT="${AAPT:-$(tool aapt)}"
+ZIPALIGN="${ZIPALIGN:-$(tool zipalign)}"
+APKSIGNER="${APKSIGNER:-$(tool apksigner)}"
 D8="${D8:-$BT/d8}"                     # Java 实现，跨架构可用
+for f in "$AJ" "$AAPT" "$ZIPALIGN" "$APKSIGNER" "$D8"; do
+  [ -e "$f" ] || { echo "缺少 $f：先运行 bash tools/setup-android-sdk.sh" >&2; exit 1; }
+done
 VERSION="${1:-0.0.2}"
 OUT="artifacts/wangu-reader-v${VERSION}.apk"
 
@@ -69,4 +75,4 @@ fi
   --out "$ROOT/$OUT" build/aligned.apk
 cd "$ROOT"
 echo "APK: $OUT ($(du -h "$OUT" | cut -f1))"
-/usr/bin/aapt dump badging "$OUT" 2>/dev/null | head -3
+"$AAPT" dump badging "$OUT" 2>/dev/null | head -3 || true

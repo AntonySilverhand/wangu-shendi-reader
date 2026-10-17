@@ -15,6 +15,9 @@ import {
 import type { PersonalStore } from '../store/personal.ts';
 import type { TocStore } from '../store/toc.ts';
 import { formatBytes, storageStats, clearBookContent, type StorageStats } from '../store/db.ts';
+import { isLocalBookId } from '../store/library.ts';
+import { TXT_ACCEPT } from '../store/txt.ts';
+import { isDownloadBookId } from '../../shared/sources.ts';
 import type { DownloadManager, DownloadState } from '../store/download.ts';
 import { formatDate } from '../format.ts';
 import { isNativeDisplayAvailable } from '../native-display.ts';
@@ -261,7 +264,14 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(sheetSection('正文缓存（可随时重新获取）', statsBox));
   const clearBtn = el('button', { class: 'btn danger small', type: 'button' }, '清理正文缓存');
   clearBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog('清理全部已缓存正文？书签和阅读进度会保留。');
+    // 本机书（TXT 导入 / 整本下载）的正文不是缓存：清理后无法在线补回
+    const ok = await confirmDialog(
+      isDownloadBookId(deps.bookId)
+        ? '清理这本书的全部正文？清理后需在“搜索书源”中重新下载整本才能阅读；书签和阅读进度会保留。'
+        : isLocalBookId(deps.bookId)
+          ? '清理这本书的全部正文？本地导入的正文无法从书源恢复；书签和阅读进度会保留。'
+          : '清理全部已缓存正文？书签和阅读进度会保留。',
+    );
     if (!ok) return;
     const n = await clearBookContent(deps.bookId);
     showToast(`已清理 ${n} 章缓存`);
@@ -279,7 +289,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   // TXT 导入 / 导出
   const txtInput = el('input', {
     type: 'file',
-    accept: '.txt,text/plain',
+    accept: TXT_ACCEPT,
     style: { display: 'none' },
   }) as HTMLInputElement;
   txtInput.addEventListener('change', async () => {
@@ -292,7 +302,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
       showToast(err instanceof Error ? err.message : '导入失败');
     }
   });
-  const importTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导入 TXT');
+  const importTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导入 TXT / ZIP');
   importTxtBtn.addEventListener('click', () => txtInput.click());
   const exportTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导出已缓存为 TXT');
   exportTxtBtn.addEventListener('click', async () => {
@@ -307,7 +317,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(
     sheetSection(
       '本地文件',
-      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '导入的 TXT 会作为本地书加入书架；书源不可用时也可继续阅读。' }),
+      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '导入的 TXT（或含 TXT 的 ZIP，支持 UTF-8/GBK）会作为本地书加入书架；书源不可用时也可继续阅读。' }),
       el('div', { class: 'row-actions' }, importTxtBtn, exportTxtBtn, txtInput),
     ),
   );

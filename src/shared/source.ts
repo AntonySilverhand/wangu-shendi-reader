@@ -89,6 +89,8 @@ export interface BookInfo {
   updatedAt?: string;
   /** 首章 id（og:novel:read_url） */
   firstChapterId?: string;
+  /** 字数（如“1596.31万字”，部分书源提供） */
+  size?: string;
 }
 
 /** 搜索结果条目 */
@@ -185,6 +187,12 @@ const ENTITIES: Record<string, string> = {
   rdquo: '\u201d',
   mdash: '\u2014',
   hellip: '\u2026',
+  emsp: '\u2003',
+  ensp: '\u2002',
+  thinsp: '\u2009',
+  middot: '\u00b7',
+  lsquo: '\u2018',
+  rsquo: '\u2019',
 };
 
 export function decodeEntities(input: string): string {
@@ -208,7 +216,7 @@ export function stripTags(html: string): string {
     .replace(/<[^>]+>/g, '');
 }
 
-function cleanText(raw: string): string {
+export function cleanText(raw: string): string {
   let t = decodeEntities(stripTags(raw));
   t = t.replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
   t = t
@@ -370,6 +378,33 @@ export function extractAnchors(html: string): NavLink[] {
     links.push({ href, text });
   }
   return links;
+}
+
+/** 从开始标签末尾起做 div 深度匹配，返回内部 HTML（正则无法处理嵌套 div） */
+export function balancedDivInner(html: string, openEnd: number): string {
+  const re = /<div\b[^>]*>|<\/div\s*>/gi;
+  re.lastIndex = openEnd;
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (m[0][1] === '/') {
+      depth--;
+      if (depth === 0) return html.slice(openEnd, m.index);
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(openEnd);
+}
+
+/** 第一个开始标签匹配 attrRe 的 div 的内部 HTML */
+export function divInner(html: string, attrRe: RegExp): string | null {
+  const re = /<div\b([^>]*)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (attrRe.test(m[1]!)) return balancedDivInner(html, m.index + m[0].length);
+  }
+  return null;
 }
 
 /** 去掉 script/style/注释后再扫描链接，避免把 JS 字符串误认成 <a> */
@@ -914,7 +949,9 @@ export type SourceErrorCode =
   | 'http'
   | 'invalid'
   | 'too_large'
-  | 'redirected';
+  | 'redirected'
+  /** 源站对当前网络启用了人机验证（如 Cloudflare challenge）：只报告，不绕过 */
+  | 'blocked';
 
 export class SourceError extends Error {
   readonly code: SourceErrorCode;
@@ -998,6 +1035,8 @@ export interface FetchOptions {
   sleep?: (ms: number) => Promise<void>;
   /** 非空时以 POST application/x-www-form-urlencoded 发送（仅用于站内搜索） */
   form?: string;
+  /** 允许的上游主机（由书源适配器设置，不来自请求参数）；缺省为万书阁 */
+  allowedHosts?: ReadonlySet<string>;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -1019,8 +1058,9 @@ async function fetchSourceHtmlDirect(
   const maxRetries = opts.retries ?? MAX_RETRIES;
   const sleep = opts.sleep ?? defaultSleep;
 
+  const hosts = opts.allowedHosts ?? ALLOWED_HOSTS;
   const parsed = new URL(url);
-  if (!ALLOWED_HOSTS.has(parsed.hostname)) {
+  if (!hosts.has(parsed.hostname)) {
     throw new SourceError('host not allowed', 'invalid', false);
   }
 
@@ -1057,11 +1097,12 @@ async function fetchSourceHtmlDirect(
         const res = await fetcher(candidate, init);
 
         if (res.status !== 200) {
+          if (await isChallengeResponse(res)) throw challengeError();
           throw new SourceError(`upstream HTTP ${res.status}`, 'http', res.status >= 500, res.status);
         }
         const finalUrl = res.url || candidate;
         const finalHost = new URL(finalUrl).hostname;
-        if (!ALLOWED_HOSTS.has(finalHost)) {
+        if (!hosts.has(finalHost)) {
           throw new SourceError('redirected off allowed host', 'redirected', false);
         }
         const contentType = res.headers.get('content-type') ?? '';
@@ -1072,7 +1113,8 @@ async function fetchSourceHtmlDirect(
         if (buf.byteLength > MAX_HTML_BYTES) {
           throw new SourceError('response too large', 'too_large', false);
         }
-        const html = new TextDecoder('utf-8').decode(buf);
+        const html = decodeHtml(new Uint8Array(buf), contentType);
+        if (isChallengeHtml(html)) throw challengeError();
         return { html, finalUrl, bytes: buf.byteLength };
       } catch (err) {
         if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
@@ -1088,6 +1130,8 @@ async function fetchSourceHtmlDirect(
                   true,
                 );
         lastError = sourceErr;
+        // 人机验证换协议/重试都不会通过，也不应尝试绕过
+        if (sourceErr.code === 'blocked') throw sourceErr;
         if (!sourceErr.retryable || attempt === maxRetries) break;
         const backoff = Math.min(4000, 400 * 2 ** attempt) + Math.random() * 250;
         await sleep(backoff);
@@ -1099,6 +1143,70 @@ async function fetchSourceHtmlDirect(
   }
 
   throw lastError ?? new SourceError('fetch failed', 'network', true);
+}
+
+/* ------------------------------------------------------------------ */
+/* 字符集与人机验证识别                                                 */
+/* ------------------------------------------------------------------ */
+
+/** 只接受这些字符集标签（其余一律按 UTF-8）；GBK 系列在 Node/Workers/WebView 均受支持 */
+const CHARSET_LABELS = new Set(['utf-8', 'utf8', 'gbk', 'gb2312', 'gb18030', 'x-gbk']);
+
+function charsetOf(text: string): string | null {
+  const m = text.match(/charset\s*=\s*["']?([A-Za-z0-9_-]+)/i);
+  const label = m?.[1]?.toLowerCase();
+  return label && CHARSET_LABELS.has(label) ? label : null;
+}
+
+/**
+ * 按字符集解码：Content-Type 的 charset 优先，其次页面头部的 <meta charset>，默认 UTF-8。
+ * 万书阁为 UTF-8；69书吧等 jieqi 站点为 GBK。
+ */
+export function decodeHtml(bytes: Uint8Array, contentType = ''): string {
+  let label = charsetOf(contentType);
+  if (!label) {
+    let head = '';
+    for (let i = 0; i < Math.min(bytes.length, 2048); i++) head += String.fromCharCode(bytes[i]!);
+    const meta = head.match(/<meta[^>]+charset\s*=\s*["']?[A-Za-z0-9_-]+[^>]*>/i);
+    label = meta ? charsetOf(meta[0]) : null;
+  }
+  try {
+    return new TextDecoder(label ?? 'utf-8').decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+}
+
+/** Cloudflare 等人机验证/安全验证页（“Just a moment...”“正在验证浏览器”）。该页不含书籍内容，按 blocked 报告，绝不尝试求解。 */
+export function isChallengeHtml(html: string): boolean {
+  const head = html.slice(0, 8192);
+  return (
+    /<title>\s*(Just a moment\.\.\.|Attention Required! \| Cloudflare|请稍候…|正在验证浏览器)\s*<\/title>/i.test(head) ||
+    // 爱下电子书等站点的 JS 安全验证页：location.pathname + "?challenge=" + token
+    /["']\?challenge=["']/.test(head) ||
+    // 只认挑战页特有的标记；正常页面也可能引用 challenges.cloudflare.com（Turnstile 组件）
+    /_cf_chl_opt|cf_chl_|cf-challenge/i.test(head)
+  );
+}
+
+async function isChallengeResponse(res: Response): Promise<boolean> {
+  if (res.headers.get('cf-mitigated') === 'challenge') return true;
+  if (res.status !== 403 && res.status !== 503 && res.status !== 429) return false;
+  try {
+    const text = await res.text();
+    return isChallengeHtml(text);
+  } catch {
+    return false;
+  }
+}
+
+function challengeError(): SourceError {
+  return new SourceError(
+    '书源开启了人机验证（如 Cloudflare），当前网络无法直接获取，请稍后再试或换个网络',
+    'blocked',
+    false,
+    403,
+  );
 }
 
 export async function fetchTocPage(
@@ -1323,7 +1431,7 @@ export async function fetchChapter(
 /* 书籍信息（详情页 og meta）                                           */
 /* ------------------------------------------------------------------ */
 
-function metaContent(html: string, property: string): string | undefined {
+export function metaContent(html: string, property: string): string | undefined {
   const esc = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const m =
     html.match(new RegExp(`<meta[^>]+property=["']${esc}["'][^>]*content=["']([^"']*)["']`, 'i')) ??

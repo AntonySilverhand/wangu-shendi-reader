@@ -98,6 +98,16 @@ export async function putChapter(record: ChapterRecord): Promise<void> {
   await txDone(tx);
 }
 
+/** 批量写入（一个事务）：整本导入/下载时避免数千个小事务 */
+export async function putChapters(records: ChapterRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const db = await openDb();
+  const tx = db.transaction(STORE_CHAPTERS, 'readwrite');
+  const store = tx.objectStore(STORE_CHAPTERS);
+  for (const record of records) store.put(record);
+  await txDone(tx);
+}
+
 export async function deleteChapter(bookId: string, chapterId: string): Promise<void> {
   const db = await openDb();
   const tx = db.transaction(STORE_CHAPTERS, 'readwrite');

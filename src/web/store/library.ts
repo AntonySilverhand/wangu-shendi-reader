@@ -3,7 +3,8 @@
  * 正文/目录仍在 IndexedDB，进度/书签仍在 PersonalStore，三者都以 bookId 关联。
  * 预置书《万古神帝》只在首次运行时加入一次（seeded），用户移除后不会自动回来。
  */
-import { DEFAULT_BOOK, isValidBookId, type BookInfo, type BookSummary } from '../../shared/source.ts';
+import { DEFAULT_BOOK, type BookInfo, type BookSummary } from '../../shared/source.ts';
+import { isDownloadBookId, isRemoteBookId as isOnlineBookId } from '../../shared/sources.ts';
 
 export const LIBRARY_KEY = 'reader.library.v1';
 
@@ -26,13 +27,14 @@ interface LibraryData {
   books: RemoteBook[];
 }
 
-/** 远程书号（数字）；本地导入书是 local-xxx */
+/** 可在线阅读的远程书号（万书阁纯数字 / 69书吧 69shuba-数字） */
 export function isRemoteBookId(id: string | null | undefined): id is string {
-  return isValidBookId(id);
+  return isOnlineBookId(id);
 }
 
+/** 本机保存的书：TXT 导入（local-xxx）或书源整本下载（ixdzs-数字） */
 export function isLocalBookId(id: string | null | undefined): id is string {
-  return typeof id === 'string' && /^local-[a-z0-9]{1,24}$/.test(id);
+  return (typeof id === 'string' && /^local-[a-z0-9]{1,24}$/.test(id)) || isDownloadBookId(id);
 }
 
 function sanitizeBook(raw: unknown): RemoteBook | null {

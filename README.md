@@ -1,6 +1,6 @@
 # 万书阅读器 · 个人小说阅读器
 
-一个干净、专注、适合长时间阅读的**个人**小说阅读网站。可在书源（万书阁）中**按书名/作者搜索并阅读任意小说**，书架管理多本书（含本地导入的 TXT）；预置书为《万古神帝》（book 36780）。正文是视觉中心，手机优先，同时适配折叠屏、平板、桌面与外接显示器。
+一个干净、专注、适合长时间阅读的**个人**小说阅读网站。可在书源（万书阁、69书吧、爱下电子书）中**按书名/作者搜索并阅读任意小说**，也可直接粘贴书籍/章节网址打开，书架管理多本书（含本地导入的 TXT 与整本下载的书）；预置书为《万古神帝》（book 36780）。正文是视觉中心，手机优先，同时适配折叠屏、平板、桌面与外接显示器。
 
 > 声明：本项目仅供个人阅读使用。正文按需从公开书源获取并缓存在使用者本机，不打包、不再分发正文内容。书源结构可能变化，适配层已与阅读器解耦，便于单独修复。
 
@@ -54,7 +54,7 @@ public/           # manifest、Service Worker、图标
 test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 ```
 
-**解耦**：书源结构只出现在 `src/shared/source.ts`。若书源改版，只需更新该文件的解析函数与 fixture 测试；正文清洗、存储、阅读界面均不受影响。
+**解耦**：书源结构只出现在书源适配文件（万书阁 `src/shared/source.ts`、69书吧 `src/shared/source-69shuba.ts`），`src/shared/sources.ts` 按书号分派。若书源改版，只需更新对应文件的解析函数与 fixture 测试；正文清洗、存储、阅读界面均不受影响。
 
 ---
 
@@ -78,11 +78,24 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 - 站内搜索为 `POST /search.html`（字段 `s`），源站约 5 秒限频，服务端在统一上游队列外再加 5 秒搜索闸门，结果缓存 30 分钟。
 - 封面取 `/img/{书号}.jpg`；网页端直接加载（no-referrer），Android 壳经受限代理加载。
 
+**69书吧（www.69shuba.com）**：
+
+- 书号在应用内写作 `69shuba-{源站书号}`（如 `69shuba-51254`），与万书阁的纯数字书号互不冲突，书架/进度/书签/缓存照常按书号隔离。
+- jieqi 模板、**GBK 编码**：详情页 `/book/{n}.htm`（og meta / `div.booknav2`）、目录页 `/book/{n}/`（单页列出全部章节，`div#catalog li[data-num]`，按 data-num 排序，目录顺序即阅读顺序）、章节页 `/txt/{n}/{章节号}`（`div.txtnav`，不分页；上一章/下一章来自 `bookinfo.preview_page/next_page`）。
+- 搜索：`POST /modules/article/search.php`，表单 `searchkey=<GBK 百分号编码>&searchtype=all`；唯一结果时源站直接跳详情页，也能解析。封面在 `static.69shuba.com/files/article/image/{n/1000}/{n}/{n}s.jpg`。
+- **该站整站前置 Cloudflare**。开发环境（云端机房 IP）访问任何页面都只拿到人机验证页，因此解析器是按已知模板写的，fixture 为合成样例（见 `test/fixtures/69shuba/README.md`），**尚未用真实页面验证**；封面图床可正常访问。遇到人机验证时接口返回 `code: "blocked"` 与中文提示，阅读器原样展示，**不尝试绕过**。是否可用取决于取书的网络（自托管服务器 / Worker / 手机）是否被源站放行。
+
+**爱下电子书（ixdzs8.com，整本下载型）**：
+
+- 书号写作 `ixdzs-{源站书号}`。书页 `/read/{n}/` 一次给出书籍信息与完整目录，搜索为 `GET /bsearch?q=`，都可正常访问。
+- **章节页前置 JS 安全验证**（“正在验证浏览器”），阅读器不绕过，因此不逐章在线阅读，而是使用站方公开的“TXT下载”（`down7.ixdzs8.com/{n}.zip`）：在详情里点“下载整本”，本机解压后按书页目录切章，保存为离线书。章节号与站点一致，重新下载即更新，阅读进度和书签保留。
+- 实测《万古神帝》（ixdzs-137695）：压缩包 14.3MB，下载+解压+切章+保存约 14 秒，4273 章与目录逐条对齐、无缺章。
+
 **后端接口限制**（防止成为任意 URL 代理）：
 
-- 只接受 `/api/chapter?book=<书号>&id=<1-12 位数字>`、`/api/toc?book=<书号>&from=&to=`（跨度 ≤ 6、页码 ≤ 999）、`/api/search?q=<1-30 字>`、`/api/health`；`book` 缺省为预置书（兼容旧客户端），书号须为 1–9 位数字。
-- URL 只能由固定 origin + 校验过的书号/章节号拼接（搜索只能是固定的 `/search.html` + `s=` 表单）；跟随重定向后再次校验 host 必须属于 `wanshuge.org`；校验 `content-type`、响应体大小上限；不透明地丢弃非正文内容（广告、跟踪脚本从不进入存储）。
-- 未实现：登录、付费、验证码绕过的任何逻辑。
+- 只接受 `/api/chapter?book=<书号>&id=<1-12 位数字>`、`/api/toc?book=<书号>&from=&to=`（跨度 ≤ 6、页码 ≤ 999）、`/api/search?q=<1-30 字>&source=<wanshuge|69shuba|ixdzs>`、`/api/health`；`book` 缺省为预置书（兼容旧客户端），书号须为 1–9 位数字或 `69shuba-`/`ixdzs-`+1–9 位数字（`ixdzs-` 书的 `/api/chapter` 直接拒绝，需整本下载）。
+- URL 只能由固定 origin + 校验过的书号/章节号拼接（搜索只能是固定的 `/search.html` + `s=` 表单或 `/modules/article/search.php` + `searchkey=&searchtype=all` 表单）；跟随重定向后再次校验 host 必须属于该书源（`wanshuge.org` / `www.69shuba.com`）；校验 `content-type`、响应体大小上限；不透明地丢弃非正文内容（广告、跟踪脚本从不进入存储）。
+- 未实现：登录、付费、验证码、Cloudflare 人机验证绕过的任何逻辑。
 
 ---
 
@@ -117,7 +130,7 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 | 数据 | 位置 | 清理影响 |
 |---|---|---|
 | 设置、阅读进度、书签、最近阅读 | localStorage | 清理正文缓存不受影响，可导出/导入 JSON |
-| 正文缓存、目录缓存、本地导入书 | IndexedDB `reader-db` | 可随时清理并重新获取（本地导入书除外） |
+| 正文缓存、目录缓存、本地导入书、整本下载的书 | IndexedDB `reader-db` | 可随时清理并重新获取（本地导入书除外；整本下载的书需重新下载） |
 
 浏览器存储有配额限制；设置页显示 `navigator.storage.estimate()` 的用量与配额。缓存写入失败不会影响当次阅读。
 
@@ -126,9 +139,10 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 ## Android APK（独立运行，无需后端）
 
 ```bash
-npm run build:android          # 构建 Android 目标 Web 资源（dist-android/）
-bash android/build.sh 0.0.17   # 打包 APK（需要 JDK + Android SDK 34：aapt/zipalign/apksigner/d8）
-# 产物：artifacts/wangu-reader-v0.0.17.apk
+bash tools/setup-android-sdk.sh   # 一次性：安装 SDK 命令行工具 + build-tools 34.0.0 + android-34 到 ~/android-sdk（需 JDK 17+）
+npm run build:android          # 构建 Android 目标 Web 资源（dist-android/；build.sh 会自动调用）
+bash android/build.sh 0.0.17   # 打包 APK（x86_64 用 SDK 里的 aapt/zipalign/apksigner；arm64 用 apt 的同名软件包）
+# 产物：artifacts/wangu-reader-v0.0.17.apk（未设 ANDROID_KEYSTORE 时用 android/debug.keystore 调试签名）
 bash tools/test-android-source.sh   # 书源白名单单测（无需 SDK）
 ```
 
@@ -149,6 +163,8 @@ npm run deploy           # build + wrangler deploy
 ## 已知限制 / 未验证项
 
 - 书源本身有缺章与重复上传（源站问题），阅读器按源站现有目录呈现并做去重排序。
+- 69书吧解析器未经真实页面验证（开发环境被 Cloudflare 拦截），首次真实使用时若目录/正文为空，请保存对应页面替换 `test/fixtures/69shuba/` 中的样例后修正解析；原生 App（`android-native/`）尚未接入 69书吧与爱下电子书。
+- 爱下电子书只能整本下载后阅读（站点章节页有安全验证）；连载中的书需手动“重新下载（更新）”获取新章节；该书源暂不显示封面（封面地址是哈希值，无法由书号拼出）。
 - 真机功耗、帧率与续航未测量（当前环境无真机，未编造数据）；性能结论来自桌面 Chromium 与本地网络，移动端为视口模拟。
 - 完整 E2E 在 8 种视口 + 6 类交互场景下 55/55 通过；最近修复（隐藏属性、行宽公式、TXT 打开行为）由 `tools/verify.sh` 聚焦回归全部覆盖。
 - 跨设备进度同步未实现；多设备各自独立。

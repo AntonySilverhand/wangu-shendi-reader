@@ -14,6 +14,8 @@ void app.start();
 
 // 供自动化测试/调试使用
 (window as unknown as { __readerApp?: App }).__readerApp = app;
+// Android 壳的系统返回键：返回 true = 网页已处理（关浮层/回书架），false = 交给系统退出
+(window as unknown as { __onNativeBack?: () => boolean }).__onNativeBack = () => app.handleBack();
 
 // Android APK：APK 内置资源，Service Worker 会与 shouldInterceptRequest 冲突、
 // 造成旧 JS 持续运行/缓存污染，且无离线意义 → 明确禁用；Web/PWA 版保留。
