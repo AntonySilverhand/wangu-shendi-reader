@@ -139,9 +139,10 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 ## Android APK（独立运行，无需后端）
 
 ```bash
-npm run build:android          # 构建 Android 目标 Web 资源（dist-android/）
-bash android/build.sh 0.0.17   # 打包 APK（需要 JDK + Android SDK 34：aapt/zipalign/apksigner/d8）
-# 产物：artifacts/wangu-reader-v0.0.17.apk
+bash tools/setup-android-sdk.sh   # 一次性：安装 SDK 命令行工具 + build-tools 34.0.0 + android-34 到 ~/android-sdk（需 JDK 17+）
+npm run build:android          # 构建 Android 目标 Web 资源（dist-android/；build.sh 会自动调用）
+bash android/build.sh 0.0.17   # 打包 APK（x86_64 用 SDK 里的 aapt/zipalign/apksigner；arm64 用 apt 的同名软件包）
+# 产物：artifacts/wangu-reader-v0.0.17.apk（未设 ANDROID_KEYSTORE 时用 android/debug.keystore 调试签名）
 bash tools/test-android-source.sh   # 书源白名单单测（无需 SDK）
 ```
 
