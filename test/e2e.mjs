@@ -673,6 +673,25 @@ async function main() {
   await xp.click('#discover-submit');
   await xp.waitForFunction(() => location.hash.endsWith('/read/2') && document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
   check('粘贴已下载书的章节网址直达该章', true);
+  // 系统返回键（Android 壳调用 window.__onNativeBack）：阅读页 → 书架；书架 → 交给系统
+  check('返回键：阅读页回书架', (await xp.evaluate(() => window.__onNativeBack())) === true);
+  await xp.waitForSelector('.book-card', { timeout: 10_000 });
+  check('返回键：书架上交给系统退出', (await xp.evaluate(() => window.__onNativeBack())) === false);
+  // 导入 ZIP（站方整本 TXT 压缩包同格式）：文件选择器 accept 含 zip，按文件头取书名/作者
+  const chooser = xp.waitForEvent('filechooser');
+  await xp.click('.quick-card:has-text("导入 TXT")');
+  const fc = await chooser;
+  check('文件选择器接受 TXT 与 ZIP', ((await fc.element().getAttribute('accept')) ?? '').includes('.zip'));
+  await fc.setFiles({ name: 'book.zip', mimeType: 'application/zip', buffer: zip });
+  await xp.waitForSelector('.shelf-card.current[data-book-id^="local-"]', { timeout: 30_000 });
+  check('导入 ZIP：书名取自文件头、3 章', ((await xp.locator('.shelf-card.current').textContent()) ?? '').includes('测试整本书') &&
+    ((await xp.locator('.shelf-card.current').textContent()) ?? '').includes('3 章'));
+  await xp.click('#continue-reading');
+  await xp.waitForFunction(() => document.querySelectorAll('#chapter-content p').length >= 30, null, { timeout: 15_000 });
+  await xp.locator('#end-home').scrollIntoViewIfNeeded();
+  await xp.click('#end-home');
+  await xp.waitForSelector('.book-card', { timeout: 10_000 });
+  check('章末“返回书架”按钮可回书架', true);
   check('爱下电子书流程无页面错误', xErrors.length === 0, xErrors.slice(0, 2).join(' | '));
   await xctx.close();
   }

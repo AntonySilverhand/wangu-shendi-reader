@@ -44,8 +44,10 @@ src/worker/    Cloudflare Worker 入口（Cache API）
 src/web/       app.ts（编排 + 路由）cover.ts（封面）
                views/（reader/toc/settings/bookmarks/search=章内搜索/discover=书源搜索/home=书架）
                store/（settings/personal/library=书架/db/toc/chapter/download/txt/remote/book-download=整本下载）
-android/       WebView 壳：MainActivity + AssetClient（https://reader.local 资源拦截）
-               + SourceProxy/SourceRules（受限书源代理：页面/搜索 POST/封面）+ build.sh
+android/       WebView 壳：MainActivity（系统返回键先交给网页 window.__onNativeBack：关浮层→回书架，不逐章回退历史）
+               + ReaderChromeClient（<input type=file> 的系统文件选择器，导入 TXT/ZIP 依赖它）
+               + AssetClient（https://reader.local 资源拦截）
+               + SourceProxy/SourceRules（受限书源代理：页面/搜索/封面/整本压缩包）+ build.sh
 test/          单元测试、真实 HTML fixtures、e2e.mjs、验证脚本
 tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 ```
@@ -53,7 +55,7 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 ## 必须遵守的约束（踩过的坑）
 
 1. **Node 直接运行 TS**（`--experimental-strip-types`）：`src/shared`、`src/server` 中**禁止**参数属性（`constructor(private x: T)`）、enum、namespace。只用可擦除语法。
-2. **Android 的 d8 对 JDK21 编译的内部类会崩溃**：`android/java` 下**禁止匿名类/内部类/嵌套类/lambda**，只写顶层类，兄弟类之间通过构造参数传引用。
+2. **Android 的 d8 对 JDK21 编译的内部类会崩溃**：`android/java` 下**禁止匿名类/内部类/嵌套类/lambda**，只写顶层类，兄弟类之间通过构造参数传引用。实现**泛型接口**（如 `ValueCallback<String>`）同样会生成让 d8 崩溃的 synthetic 桥方法，改用原始类型 `implements ValueCallback` + `onReceiveValue(Object)`（见 `DisplayReadyCallback`）。
 3. **上游请求必须走 `source.ts` 的队列**（并发上限 2 + 最小间隔 160ms + 优先级）。章节等用户请求用默认 `high`，目录/预取传 `highPriority: false`。禁止绕过队列直接 fetch，也禁止改回全局串行——全局串行会造成队头阻塞（源站一慢，全线卡住）。
 4. **缓存键改动必须升版本**（如 `chapter:v2:`）。服务端磁盘缓存（`.cache/api`）与客户端 IndexedDB 都可能残留旧数据；改缓存语义时同步升 `CHAPTER_CACHE_VERSION`，并让旧记录失效后**先显示缓存再后台补全**（不可阻塞阅读）。
 5. **`complete` 语义**：只有 `ChapterResult.complete === true` 才算完整；客户端把 `undefined` 当不完整处理（触发补全）。章节内容永远"宁多勿少"——补全结果更短时不要覆盖。

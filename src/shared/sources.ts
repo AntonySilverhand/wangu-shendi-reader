@@ -155,10 +155,11 @@ export function searchSource(source: SourceId, query: string, opts: FetchOptions
 /**
  * 合并目录页：
  *  - 万书阁：多页 + 源站错号/重传启发式（mergeTocEntries）；
- *  - 69书吧 / 爱下电子书：目录页即权威顺序，只按 id 去重。
+ *  - 其它（69书吧 / 爱下电子书 / 本地 TXT）：目录本身即权威顺序，只按 id 去重。
+ *    本地书若套用万书阁启发式，会把同号同名的章节（如番外重新从第一章编号）当重复丢掉。
  */
 export function mergeBookToc(bookId: string, pages: TocEntry[][]): TocEntry[] {
-  if (!isShubaBookId(bookId) && !isIxdzsBookId(bookId)) return mergeTocEntries(pages);
+  if (sourceOfBook(bookId) === 'wanshuge') return mergeTocEntries(pages);
   const seen = new Set<string>();
   const out: TocEntry[] = [];
   for (const page of pages) {

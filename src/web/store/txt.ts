@@ -4,6 +4,8 @@
  */
 import type { TocEntry } from '../../shared/source.ts';
 import { normalizeTitle } from '../../shared/source.ts';
+import { splitIxdzsTxt } from '../../shared/source-ixdzs.ts';
+import { decodeTextBytes, extractFirstTxt } from '../../shared/zip.ts';
 import { deleteChapterIds, listChapterIds, listChapters, putChapters, putToc, type ChapterRecord } from './db.ts';
 
 export interface LocalBookMeta {
@@ -19,6 +21,8 @@ export interface LocalBookMeta {
 }
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
+/** 文件选择器的 accept：TXT 与含 TXT 的 ZIP（Android 壳的原生选择器不按此过滤，导入时按内容识别） */
+export const TXT_ACCEPT = '.txt,.zip,text/plain,application/zip';
 const LOCAL_PAGES_PER_CHUNK = 100;
 
 export function listLocalBooks(): LocalBookMeta[] {
@@ -176,25 +180,73 @@ export async function saveLocalBook(
   return meta;
 }
 
+/** 导入文件上限：整本 TXT（万古神帝约 32MB）或其压缩包 */
+export const MAX_IMPORT_BYTES = 96 * 1024 * 1024;
+
+export interface PreparedImport {
+  title: string;
+  author?: string;
+  chapters: LocalChapterInput[];
+  /** 解码后的文本字节数（UTF-8 计） */
+  bytes: number;
+}
+
+/** 爱下电子书等站方 TXT 的头：『书名/作者:xxx』 */
+const HEADER_RE = /^『([^/『』]{1,60})\/作者[:：]([^『』]{1,40})』$/;
+
+/**
+ * 把用户选的文件（.txt 或含 .txt 的 .zip）解析成章节（纯函数，便于测试）：
+ *  - 编码：BOM → 严格 UTF-8 → GB18030（国内 TXT 多为 GBK，旧版按 UTF-8 读会乱码）
+ *  - 爱下电子书格式（“章节内容开始”分隔线 + 顶格标题/缩进正文）按顶格行切章，书名/作者取自文件头
+ *  - 其它 TXT 用通用标题规则
+ */
+export async function prepareTxtImport(fileName: string, data: Uint8Array): Promise<PreparedImport> {
+  if (data.length > MAX_IMPORT_BYTES) throw new Error('文件过大（上限 96MB）');
+  let name = fileName;
+  let bytes = data;
+  const isZip = /\.zip$/i.test(fileName) || (data[0] === 0x50 && data[1] === 0x4b && data[2] === 0x03 && data[3] === 0x04);
+  if (isZip) {
+    try {
+      const entry = await extractFirstTxt(data);
+      name = entry.name.split('/').pop() ?? entry.name;
+      bytes = entry.data;
+    } catch (err) {
+      throw new Error(`压缩包里没有可导入的 TXT（${err instanceof Error ? err.message : String(err)}）`);
+    }
+  }
+  const text = decodeTextBytes(bytes);
+  let title = name.replace(/\.[^.]+$/, '').slice(0, 40) || '本地导入';
+  let author: string | undefined;
+  const head = text.slice(0, 400).replace(/\r/g, '').split('\n')[0]?.trim() ?? '';
+  const header = head.match(HEADER_RE);
+  if (header) {
+    title = header[1]!.trim();
+    author = header[2]!.trim();
+  }
+
+  let chapters: LocalChapterInput[];
+  if (/^-{3,}\s*章节内容开始\s*-{3,}\s*$/m.test(text.slice(0, 20_000))) {
+    chapters = splitIxdzsTxt(text, []).chapters;
+  } else {
+    chapters = splitTxt(text).map((chap, i) => ({ id: String(i + 1), title: chap.title, paragraphs: chap.lines }));
+  }
+  chapters = chapters.filter((c) => c.paragraphs.length > 0 || chapters.length === 1);
+  if (chapters.length === 0) throw new Error('没有识别到任何章节');
+  return { title, author, chapters, bytes: bytes.length };
+}
+
 export async function importTxtFile(
   file: File,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ImportResult> {
-  const text = await file.text();
-  const bytes = new TextEncoder().encode(text).length;
-  const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 40) || '本地导入';
+  if (file.size > MAX_IMPORT_BYTES) throw new Error('文件过大（上限 96MB）');
+  const prepared = await prepareTxtImport(file.name, new Uint8Array(await file.arrayBuffer()));
   const bookId = `local-${Date.now().toString(36)}`;
-  const rawChapters = splitTxt(text);
-  if (rawChapters.length === 0) throw new Error('没有识别到任何章节');
   const meta = await saveLocalBook(
-    {
-      bookId,
-      title: baseName,
-      chapters: rawChapters.map((chap, i) => ({ id: String(i + 1), title: chap.title, paragraphs: chap.lines })),
-    },
+    { bookId, title: prepared.title, author: prepared.author, chapters: prepared.chapters },
     onProgress,
   );
-  return { bookId, title: baseName, chapters: meta.chapters, bytes };
+  return { bookId, title: prepared.title, chapters: meta.chapters, bytes: prepared.bytes };
 }
 
 /** 把已缓存的章节导出为单个 TXT（按目录顺序） */

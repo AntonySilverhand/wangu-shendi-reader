@@ -19,7 +19,7 @@ import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
 import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
-import { importTxtFile, exportCachedTxt, listLocalBooks, type LocalBookMeta } from './store/txt.ts';
+import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { LibraryStore, isLocalBookId, isRemoteBookId } from './store/library.ts';
 import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '../shared/source.ts';
 import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
@@ -97,6 +97,7 @@ export class App {
       onNavigate: (id) => void this.openChapter(id),
       onPositionChange: (pos) => this.savePosition(pos),
       onRequestRetry: () => this.currentChapterId && void this.openChapter(this.currentChapterId, { force: true }),
+      onGoHome: () => this.goHome(),
     });
     this.tocView = this.createTocView();
     this.discover = new DiscoverView({
@@ -171,8 +172,8 @@ export class App {
       return {
         id: b.id,
         title: b.title,
-        // 书源整本下载的书：作者 · 书源；TXT 导入：本地导入
-        author: source ? `${b.author || '佚名'} · ${source}` : '本地导入',
+        // 书源整本下载的书：作者 · 书源；TXT 导入：作者 · 本地导入（文件头没有作者时只写本地导入）
+        author: source ? `${b.author || '佚名'} · ${source}` : b.author ? `${b.author} · 本地导入` : '本地导入',
         local: true,
         sortKey: sortKey(b.id, b.importedAt),
         note: `${b.chapters} 章 · ${formatTime(b.importedAt)}${source ? '下载' : '导入'}`,
@@ -657,7 +658,7 @@ export class App {
   private currentBookAuthor(): string {
     if (isRemoteBookId(this.bookId)) return this.library.get(this.bookId)?.author || '佚名';
     if (isDownloadBookId(this.bookId)) return this.localBooks.find((b) => b.id === this.bookId)?.author || '佚名';
-    return '本地导入';
+    return this.localBooks.find((b) => b.id === this.bookId)?.author || '本地导入';
   }
 
   /* ---------------------------- 阅读流程 ---------------------------- */
@@ -1062,7 +1063,7 @@ export class App {
   /* ---------------------------- TXT 导入/导出 ---------------------------- */
 
   private pickTxtFile(): void {
-    const input = el('input', { type: 'file', accept: '.txt,text/plain', style: { display: 'none' } }) as HTMLInputElement;
+    const input = el('input', { type: 'file', accept: TXT_ACCEPT, style: { display: 'none' } }) as HTMLInputElement;
     input.addEventListener('change', () => {
       const file = input.files?.[0];
       input.remove();
@@ -1073,11 +1074,42 @@ export class App {
   }
 
   private async handleTxtImport(file: File): Promise<void> {
-    showToast('正在解析 TXT…');
-    const result = await importTxtFile(file);
+    showToast(`正在导入 ${file.name}…`);
+    let result;
+    try {
+      result = await importTxtFile(file, (done, total) => {
+        if (done < total && done % 1000 < 200) showToast(`正在保存 ${done}/${total} 章…`);
+      });
+    } catch (err) {
+      showToast(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     this.localBooks = listLocalBooks();
-    showToast(`已导入《${result.title}》共 ${result.chapters} 章`);
     await this.switchBook(result.bookId);
+    // 切换完成后再提示，避免用户在切换过程中点到旧书
+    showToast(`已导入《${result.title}》共 ${result.chapters} 章`);
+  }
+
+  /**
+   * 系统返回键（Android 壳经 window.__onNativeBack 调用）：
+   * 浮层 → 章内搜索 → 紧凑目录 → 阅读/搜索页回书架；已在书架返回 false 交给系统（退出）。
+   * 不按网页历史逐章回退。
+   */
+  handleBack(): boolean {
+    if (closeActiveSheet()) return true;
+    if (this.search.isOpen()) {
+      this.search.close();
+      return true;
+    }
+    if (this.tocView.isOpen() && (this.layout.current === 'compact' || this.view !== 'reader')) {
+      this.tocView.close();
+      return true;
+    }
+    if (this.view !== 'home') {
+      this.goHome();
+      return true;
+    }
+    return false;
   }
 
   private async handleTxtExport(_from: number, _to: number): Promise<void> {
@@ -1117,7 +1149,10 @@ export class App {
 
   /** 切换到某本书并回书架 */
   private async switchBook(bookId: string): Promise<void> {
+    const hashBefore = location.hash;
     if (bookId !== this.bookId) await this.activateBook(bookId);
+    // 切换（读目录/缓存索引）期间用户已经导航到别处：不要再把他拉回书架
+    if (location.hash !== hashBefore) return;
     if (location.hash === '' || location.hash === '#') this.showHome();
     else location.hash = '';
   }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { deflateRawSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -25,50 +24,11 @@ import {
   sourceOfBook,
 } from '../src/shared/sources.ts';
 import { handleApi, MemoryApiCache, type SearchResponse } from '../src/shared/api.ts';
+import { makeZip } from './helpers/zip.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) => readFileSync(join(here, 'fixtures', 'ixdzs', name), 'utf8');
 const BOOK = 'ixdzs-593824';
-
-/** 测试用最小 ZIP 写入器（单文件；method 8 = deflate，0 = stored） */
-function makeZip(name: string, data: Uint8Array, method: 0 | 8 = 8, opts: { badSize?: boolean } = {}): Uint8Array {
-  const nameBytes = new TextEncoder().encode(name);
-  const body = method === 8 ? new Uint8Array(deflateRawSync(data)) : data;
-  const size = opts.badSize ? data.length + 1 : data.length;
-  const local = new Uint8Array(30 + nameBytes.length);
-  const lv = new DataView(local.buffer);
-  lv.setUint32(0, 0x04034b50, true);
-  lv.setUint16(4, 20, true);
-  lv.setUint16(6, 0x800, true);
-  lv.setUint16(8, method, true);
-  lv.setUint32(18, body.length, true);
-  lv.setUint32(22, size, true);
-  lv.setUint16(26, nameBytes.length, true);
-  local.set(nameBytes, 30);
-  const central = new Uint8Array(46 + nameBytes.length);
-  const cv = new DataView(central.buffer);
-  cv.setUint32(0, 0x02014b50, true);
-  cv.setUint16(8, 0x800, true);
-  cv.setUint16(10, method, true);
-  cv.setUint32(20, body.length, true);
-  cv.setUint32(24, size, true);
-  cv.setUint16(28, nameBytes.length, true);
-  cv.setUint32(42, 0, true);
-  central.set(nameBytes, 46);
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, 1, true);
-  ev.setUint16(10, 1, true);
-  ev.setUint32(12, central.length, true);
-  ev.setUint32(16, local.length + body.length, true);
-  const out = new Uint8Array(local.length + body.length + central.length + eocd.length);
-  out.set(local, 0);
-  out.set(body, local.length);
-  out.set(central, local.length + body.length);
-  out.set(eocd, local.length + body.length + central.length);
-  return out;
-}
 
 const sampleBytes = () => new Uint8Array(readFileSync(join(here, 'fixtures', 'ixdzs', 'sample-gb18030.txt')));
 
@@ -204,17 +164,28 @@ describe('整本 TXT 按目录切章', () => {
     expect(all).not.toMatch(/ixdzs|爱下电子书|已完结|『/);
   });
 
-  it('没有目录时退回按顶格标题切分（章节号顺排）', () => {
+  it('没有目录时退回按顶格短行切分（章节号顺排）', () => {
     const r = splitIxdzsTxt(text(), []);
     expect(r.aligned).toBe(false);
-    expect(r.chapters.map((c) => c.title)).toEqual([
-      '第1章落魄后裔',
-      '第2章深渊奇遇',
-      '第3章击杀仇人',
-      '第5章美人计',
-      '这一行没有缩进，但不是目录里的标题，应作为正文保留。',
-    ]);
-    expect(r.chapters.map((c) => c.id)).toEqual(['1', '2', '3', '4', '5']);
+    expect(r.chapters.map((c) => c.title)).toEqual(['第1章落魄后裔', '第2章深渊奇遇', '第3章击杀仇人', '第5章美人计']);
+    expect(r.chapters.map((c) => c.id)).toEqual(['1', '2', '3', '4']);
+    // 以句号结尾的顶格长句是正文
+    expect(r.chapters[3]!.paragraphs).toContain('这一行没有缩进，但不是目录里的标题，应作为正文保留。');
+  });
+
+  it('无目录模式：缩进的“第N章…”是正文，以句号结尾的“第N章”顶格行仍是标题', () => {
+    const txt = [
+      '------章节内容开始-------',
+      '第1章开端',
+      '\u3000\u3000第三章，这是正文里引用的章节名',
+      '第2章明王坐禅玉失珠。',
+      '\u3000\u3000正文。',
+      '番外故事，相当于是前传，主要讲述年轻时候的一些故事，当然，还有别的一些大人物登场。',
+    ].join('\r\n');
+    const r = splitIxdzsTxt(txt, []);
+    expect(r.chapters.map((c) => c.title)).toEqual(['第1章开端', '第2章明王坐禅玉失珠。']);
+    expect(r.chapters[0]!.paragraphs).toEqual(['第三章，这是正文里引用的章节名']);
+    expect(r.chapters[1]!.paragraphs).toHaveLength(2);
   });
 });
 

@@ -258,7 +258,7 @@ export interface TxtSplitResult {
 const MARKER_RE = /^-{3,}\s*章节内容开始\s*-{3,}$/;
 const TRAILER_RE = /^(?:=+\s*已完结\s*=+|『[^』]*』?)$/;
 const AD_RE = /爱下电子书|ixdzs\d*\.(?:com|tw|hk)/i;
-const FALLBACK_HEADING_RE = /^(?:第[零〇一二三四五六七八九十百千万两\d]+[章节回卷]|番外|序章|楔子|尾声|完本感言)/;
+const NUMBERED_HEADING_RE = /^第[零〇一二三四五六七八九十百千万两\d]+[章节回卷]/;
 /** 目录对齐时允许向后跳过（TXT 缺章）的最大章数 */
 const ALIGN_WINDOW = 200;
 
@@ -316,15 +316,19 @@ export function splitIxdzsTxt(text: string, catalog: TocEntry[]): TxtSplitResult
     return { chapters, missing, aligned: true };
   }
 
-  // 退路：顶格行（或“第N章”行）即标题，章节号顺排
+  // 退路：顶格的短行即标题，章节号顺排。该格式标题一律顶格，缩进行即使以“第N章”开头也是正文
+  // （实测《万古神帝》18 处引用章节名）。作者的话里偶有未缩进的长段落（实测 8 处），不当标题：
+  // 标题 ≤ 40 字，且除“第N章…”外不以句号结尾（目录里确有“第2796章 明王坐禅玉失珠。”）。
   const fallback: TxtChapter[] = [];
   let cur: TxtChapter | null = null;
+  const headingLike = (line: string) =>
+    [...line].length <= 40 && (!/[。…]$/.test(line) || NUMBERED_HEADING_RE.test(line));
   for (let i = start; i < lines.length; i++) {
     const raw = lines[i]!;
     const line = raw.trim();
     if (!line) continue;
     if (TRAILER_RE.test(line) || (AD_RE.test(line) && line.length <= 120)) continue;
-    if (!/^[　 \t]/.test(raw) || FALLBACK_HEADING_RE.test(line)) {
+    if (!/^[　 \t]/.test(raw) && headingLike(line)) {
       cur = { id: String(fallback.length + 1), title: line, paragraphs: [] };
       fallback.push(cur);
       continue;

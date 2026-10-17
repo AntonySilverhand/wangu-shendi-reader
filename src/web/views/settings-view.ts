@@ -16,6 +16,7 @@ import type { PersonalStore } from '../store/personal.ts';
 import type { TocStore } from '../store/toc.ts';
 import { formatBytes, storageStats, clearBookContent, type StorageStats } from '../store/db.ts';
 import { isLocalBookId } from '../store/library.ts';
+import { TXT_ACCEPT } from '../store/txt.ts';
 import { isDownloadBookId } from '../../shared/sources.ts';
 import type { DownloadManager, DownloadState } from '../store/download.ts';
 import { formatDate } from '../format.ts';
@@ -288,7 +289,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   // TXT 导入 / 导出
   const txtInput = el('input', {
     type: 'file',
-    accept: '.txt,text/plain',
+    accept: TXT_ACCEPT,
     style: { display: 'none' },
   }) as HTMLInputElement;
   txtInput.addEventListener('change', async () => {
@@ -301,7 +302,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
       showToast(err instanceof Error ? err.message : '导入失败');
     }
   });
-  const importTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导入 TXT');
+  const importTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导入 TXT / ZIP');
   importTxtBtn.addEventListener('click', () => txtInput.click());
   const exportTxtBtn = el('button', { class: 'btn small', type: 'button' }, '导出已缓存为 TXT');
   exportTxtBtn.addEventListener('click', async () => {
@@ -316,7 +317,7 @@ export function openDataSheet(deps: SettingsDeps): SheetHandle {
   body.appendChild(
     sheetSection(
       '本地文件',
-      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '导入的 TXT 会作为本地书加入书架；书源不可用时也可继续阅读。' }),
+      el('p', { class: 'loading-note', style: { textAlign: 'left' }, text: '导入的 TXT（或含 TXT 的 ZIP，支持 UTF-8/GBK）会作为本地书加入书架；书源不可用时也可继续阅读。' }),
       el('div', { class: 'row-actions' }, importTxtBtn, exportTxtBtn, txtInput),
     ),
   );

@@ -20,6 +20,8 @@ export interface ReaderCallbacks {
   onNavigate: (chapterId: string) => void;
   onPositionChange: (pos: { paragraph: number; offset: number }) => void;
   onRequestRetry: () => void;
+  /** 返回书架（换书） */
+  onGoHome: () => void;
 }
 
 export interface RenderedChapter {
@@ -386,6 +388,7 @@ export class ReaderView {
           '重试',
         ),
         el('button', { class: 'btn', type: 'button', onclick: () => this.cb.onOpenToc() }, '打开目录'),
+        el('button', { class: 'btn ghost', type: 'button', id: 'error-home', onclick: () => this.cb.onGoHome() }, '返回书架'),
       ),
     );
     this.contentEl.appendChild(box);
@@ -468,6 +471,7 @@ export class ReaderView {
       el(
         'div',
         { class: 'row-actions' },
+        el('button', { class: 'btn ghost small', type: 'button', id: 'end-home', onclick: () => this.cb.onGoHome() }, '返回书架'),
         el('button', { class: 'btn ghost small', type: 'button', onclick: () => this.cb.onOpenToc() }, '章节目录'),
         el(
           'button',

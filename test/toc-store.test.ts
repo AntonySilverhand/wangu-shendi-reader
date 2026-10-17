@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TocStore } from '../src/web/store/toc.ts';
+import { mergeBookToc } from '../src/shared/sources.ts';
 import type { TocEntry, TocRangeResult } from '../src/shared/source.ts';
 
 const entry = (id: string, n: number): TocEntry => ({
@@ -47,5 +48,15 @@ describe('TocStore：单页目录', () => {
     expect(store.totalPages).toBe(3);
     expect([...store.failedPages]).toEqual([2]);
     expect(store.status).toBe('exhausted');
+  });
+});
+
+describe('mergeBookToc：本地书保持导入顺序', () => {
+  it('同号同名章节（番外重新编号）不被当成重复丢弃', () => {
+    const entries = [entry('1', 1), entry('2', 2), { ...entry('3', 1) }, { ...entry('4', 2) }];
+    expect(mergeBookToc('local-abc', [entries]).map((e) => e.id)).toEqual(['1', '2', '3', '4']);
+    expect(mergeBookToc('ixdzs-137695', [entries]).map((e) => e.id)).toEqual(['1', '2', '3', '4']);
+    // 万书阁仍按源站错号/重传规则去重
+    expect(mergeBookToc('36780', [entries]).length).toBeLessThan(4);
   });
 });
