@@ -21,6 +21,7 @@ import {
   type TocItemRaw,
 } from '../src/shared/source.ts';
 
+import { cleanParagraphs } from '../src/shared/text-clean.ts';
 const B = '36780';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -312,6 +313,27 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
       '/book/36780/38621571_1.html',
       '/book/36780/38621571_2.html',
     ]);
+  });
+
+  it('服务端返回原文（清洗在客户端读取时按设置进行）：分页提示与水印保留，清洗后消失', async () => {
+    const encoded = (text: string) =>
+      `<script>document.writeln(qsbs.bb('${Buffer.from(`<p>${text}</p>`).toString('base64')}'));</script>`;
+    const dirty = html('chapter-38621571-p2.html').replace(
+      '<p>请勿开启浏览器阅读模式',
+      `${encoded('本小章还未完，请点击下一页继续阅读后面精彩内容！')}${encoded('最后一句。【△網www.AiQuxs.】')}<p>请勿开启浏览器阅读模式`,
+    );
+    const routes: Record<string, string> = { ...routes2871, '/book/36780/38621571_1.html': dirty };
+    const fetcher = async (input: string): Promise<Response> => {
+      const body = routes[new URL(input).pathname];
+      return new Response(body ?? '', { status: body !== undefined ? 200 : 404 });
+    };
+    const r = await fetchChapter(B, '38621571', { fetcher, ...noRetry });
+    expect(r.complete).toBe(true);
+    expect(r.paragraphs.join('\n')).toMatch(/请点击下一页/);
+    expect(r.charCount).toBe(r.paragraphs.reduce((n, p) => n + p.length, 0));
+    const cleaned = cleanParagraphs(r.paragraphs);
+    expect(cleaned).toContain('最后一句。');
+    expect(cleaned.join('\n')).not.toMatch(/下一页|www|AiQuxs/);
   });
 
   it('_1 抓取失败：保留已取内容、complete=false、missingPages 记录已知缺口', async () => {

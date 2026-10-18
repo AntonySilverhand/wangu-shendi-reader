@@ -29,6 +29,7 @@ import {
   type TocEntry,
   type TocRangeResult,
 } from './source.ts';
+import { isJunkLine } from './text-clean.ts';
 
 export const IXDZS = {
   id: 'ixdzs',
@@ -322,7 +323,7 @@ export function splitIxdzsTxt(text: string, catalog: TocEntry[]): TxtSplitResult
   const fallback: TxtChapter[] = [];
   let cur: TxtChapter | null = null;
   const headingLike = (line: string) =>
-    [...line].length <= 40 && (!/[。…]$/.test(line) || NUMBERED_HEADING_RE.test(line));
+    [...line].length <= 40 && (!/[。…]$/.test(line) || NUMBERED_HEADING_RE.test(line)) && !isJunkLine(line);
   for (let i = start; i < lines.length; i++) {
     const raw = lines[i]!;
     const line = raw.trim();

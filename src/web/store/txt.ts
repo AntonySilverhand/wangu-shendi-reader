@@ -5,6 +5,7 @@
 import type { TocEntry } from '../../shared/source.ts';
 import { normalizeTitle } from '../../shared/source.ts';
 import { splitIxdzsTxt } from '../../shared/source-ixdzs.ts';
+import { cleanParagraphs } from '../../shared/text-clean.ts';
 import { decodeTextBytes, extractFirstTxt } from '../../shared/zip.ts';
 import { deleteChapterIds, listChapterIds, listChapters, putChapters, putToc, type ChapterRecord } from './db.ts';
 
@@ -120,6 +121,7 @@ export async function saveLocalBook(
   for (let i = 0; i < chapters.length; i += SAVE_BATCH) {
     const batch: ChapterRecord[] = [];
     for (const chap of chapters.slice(i, i + SAVE_BATCH)) {
+      // 存原文：采集站的分页提示/广告在读取时按“清理站点广告”设置清洗（chapter.ts），关掉即可看到原文
       const paragraphs = chap.paragraphs.filter((l) => l.length > 0);
       const info = normalizeTitle(chap.title);
       entries.push({
@@ -253,6 +255,7 @@ export async function importTxtFile(
 export async function exportCachedTxt(
   bookId: string,
   entries: TocEntry[],
+  clean = true,
 ): Promise<{ text: string; count: number }> {
   const records = await listChapters(bookId);
   const byId = new Map(records.map((r) => [r.chapterId, r]));
@@ -261,7 +264,8 @@ export async function exportCachedTxt(
   for (const entry of entries) {
     const rec = byId.get(entry.id);
     if (!rec) continue;
-    parts.push(`${entry.displayTitle}\n\n${rec.paragraphs.join('\n')}\n`);
+    const paragraphs = clean ? cleanParagraphs(rec.paragraphs) : rec.paragraphs;
+    parts.push(`${entry.displayTitle}\n\n${paragraphs.join('\n')}\n`);
     count++;
   }
   return { text: parts.join('\n'), count };

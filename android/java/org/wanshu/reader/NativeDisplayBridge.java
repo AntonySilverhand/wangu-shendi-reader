@@ -31,4 +31,10 @@ public final class NativeDisplayBridge {
   public void onPageReady() {
     activity.onPageReady();
   }
+
+  /** 阅读时保持屏幕常亮（设置项）：WebView 不支持 Screen Wake Lock API */
+  @JavascriptInterface
+  public void setKeepScreenOn(boolean on) {
+    activity.onSetKeepScreenOn(on);
+  }
 }

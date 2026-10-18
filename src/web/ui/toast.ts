@@ -21,6 +21,16 @@ export function showToast(text: string, ms = 2200): void {
   }, ms);
 }
 
+/** 当前打开的确认框（返回键/Esc 需要先关它，否则会残留在切换后的页面上） */
+let activeDialogCancel: (() => void) | null = null;
+
+/** 关闭打开着的确认框（按“取消”处理）；没有时返回 false */
+export function closeActiveDialog(): boolean {
+  if (!activeDialogCancel) return false;
+  activeDialogCancel();
+  return true;
+}
+
 export function confirmDialog(message: string, confirmLabel = '确定'): Promise<boolean> {
   return new Promise((resolve) => {
     const endOverlay = beginOverlay();
@@ -48,6 +58,7 @@ export function confirmDialog(message: string, confirmLabel = '确定'): Promise
       ),
     );
     const finish = (value: boolean) => {
+      if (activeDialogCancel === cancel) activeDialogCancel = null;
       backdrop.remove();
       dialog.remove();
       document.removeEventListener('keydown', onKey, true);
@@ -57,6 +68,9 @@ export function confirmDialog(message: string, confirmLabel = '确定'): Promise
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') finish(false);
     };
+    const cancel = () => finish(false);
+    activeDialogCancel?.();
+    activeDialogCancel = cancel;
     okBtn.addEventListener('click', () => finish(true));
     cancelBtn.addEventListener('click', () => finish(false));
     backdrop.addEventListener('click', () => finish(false));
