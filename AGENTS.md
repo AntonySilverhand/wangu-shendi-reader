@@ -70,10 +70,12 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
     必须同时给 Android 壳接上原生实现，否则 APK 里“点了没反应”。网页侧统一走 `save-file.ts`（导出）、
     `setNativeKeepScreenOn`（常亮）、`window.__onNativeBack`（返回键）这类适配层；本机书（`isRemoteBookId` 为假）不得发章节网络请求。
 11. **切书时防串书**：异步回调/位置保存要核对 bookId（如 `ReaderView.currentBookId`），否则旧书的滚动保存会写进新书进度。
-12. **正文一律过 `cleanParagraphs`**（`src/shared/text-clean.ts`）：采集站会把“本小章还未完，请点击下一页继续阅读后面精彩内容！”、
+12. **正文展示前过 `cleanParagraphs`，存储与服务端永远是原文**（`src/shared/text-clean.ts`）：采集站会把“本小章还未完，请点击下一页继续阅读后面精彩内容！”、
     `<!--over-->`、`【△網www.…】`、“看最新章节内容，请下载…”之类混进正文（实测《万古神帝》整本 TXT 有 1796 处分页提示）。
-    书源解析（万书阁在合并分页**之后**）、`saveLocalBook` 入库、`chapter.ts` 读取（旧缓存/升级前导入的书不必重新获取）、导出 TXT 都要过它；
-    新书源同样接上。规则只删短行与带网址/站名的固定写法，作者的话（求票、推荐新书）不动；清洗幂等，读取时清洗所以不升缓存版本。
+    清洗只在客户端读取时做（`chapter.ts` 的 `viewRecord`）、导出 TXT 也按设置清洗，由设置 `cleanSiteText`（“清理站点广告”，默认开）控制：
+    规则再准也可能误删短句，关掉开关必须能看到原文，所以 `saveLocalBook`、`toRecord`、服务端解析都不得清洗；
+    “宁多勿少”的比较用存储的原文，不用展示视图。清洗幂等，读取时清洗所以不升缓存版本，旧缓存/升级前导入的书无需重新获取。
+    新书源无需额外接入。
     分页提示处只在段末是逗号/冒号时接段（段末是汉字多为作者漏句号，硬接会读不通）。新增规则先用真实整本 TXT 跑一遍、列出删掉的行人工核对。
 
 ## 书源适配速查

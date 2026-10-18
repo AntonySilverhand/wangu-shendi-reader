@@ -20,6 +20,8 @@ export interface Settings {
   paperTexture: boolean;
   autoHideBars: boolean;
   prefetch: boolean;
+  /** 读取时清理采集站混进正文的广告/分页提示（见 text-clean.ts）；存储的永远是原文，关掉即可看到原文 */
+  cleanSiteText: boolean;
   keepScreenAwake: boolean;
   /**
    * Android 壳：阅读时隐藏状态栏（导航手势条始终保留）。
@@ -73,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
   paperTexture: true,
   autoHideBars: true,
   prefetch: true,
+  cleanSiteText: true,
   keepScreenAwake: false,
   hideStatusBar: false,
 };
@@ -95,6 +98,7 @@ function sanitize(raw: unknown): Settings {
   if (typeof r.paperTexture === 'boolean') s.paperTexture = r.paperTexture;
   if (typeof r.autoHideBars === 'boolean') s.autoHideBars = r.autoHideBars;
   if (typeof r.prefetch === 'boolean') s.prefetch = r.prefetch;
+  if (typeof r.cleanSiteText === 'boolean') s.cleanSiteText = r.cleanSiteText;
   if (typeof r.keepScreenAwake === 'boolean') s.keepScreenAwake = r.keepScreenAwake;
   if (typeof r.hideStatusBar === 'boolean') s.hideStatusBar = r.hideStatusBar;
   return s;

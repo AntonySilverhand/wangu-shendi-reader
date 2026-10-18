@@ -31,6 +31,7 @@ import {
 import { handleApi, MemoryApiCache, type SearchResponse } from '../src/shared/api.ts';
 import type { ChapterResult, TocRangeResult } from '../src/shared/source.ts';
 
+import { cleanParagraphs } from '../src/shared/text-clean.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 /** 69书吧 fixture 原始字节（GBK） */
 const bytes = (name: string) => new Uint8Array(readFileSync(join(here, 'fixtures', '69shuba', name)));
@@ -235,14 +236,16 @@ describe('69书吧：章节', () => {
     expect(ch.charCount).toBe(ch.paragraphs.join('').length);
   });
 
-  it('采集站分页提示/水印不进正文', () => {
+  it('原文保留采集站分页提示/水印（客户端读取时按设置清洗），清洗后正文完整', () => {
     const html = page('chapter-30001002.html').replace(
       '&emsp;&emsp;“拜师。”<br />',
       '&emsp;&emsp;本小章还未完，请点击下一页继续阅读后面精彩内容！<br />\n&emsp;&emsp;“拜师。”【△網www.AiQuxs.】<br />',
     );
     const ch = parseShubaChapter(BOOK, '30001002', html);
-    expect(ch.paragraphs.join('\n')).not.toMatch(/下一页|www/);
-    expect(ch.paragraphs).toContain('“拜师。”');
+    expect(ch.paragraphs.join('\n')).toMatch(/下一页/);
+    const cleaned = cleanParagraphs(ch.paragraphs);
+    expect(cleaned.join('\n')).not.toMatch(/下一页|www/);
+    expect(cleaned).toContain('“拜师。”');
     expect(ch.complete).toBe(true);
   });
 

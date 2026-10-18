@@ -206,6 +206,14 @@ export function openSettingsSheet(deps: SettingsDeps): SheetHandle {
     toggle('预取下一章', '阅读时提前缓存下一章，省流量模式自动关闭', s.prefetch, (v) => apply({ prefetch: v })),
   );
   body.appendChild(
+    toggle(
+      '清理站点广告',
+      '去掉正文里站点插入的“请点击下一页继续阅读”、网址水印等文字。遇到被误删的句子，关闭后即可看到原文',
+      s.cleanSiteText,
+      (v) => apply({ cleanSiteText: v }),
+    ),
+  );
+  body.appendChild(
     toggle('阅读时保持屏幕常亮', '默认关闭；开启后仅在阅读页生效', s.keepScreenAwake, (v) =>
       apply({ keepScreenAwake: v }),
     ),

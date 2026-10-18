@@ -34,21 +34,23 @@ export async function purgeOutdatedChapters(): Promise<number> {
   return stale.length;
 }
 
+/** 设置“清理站点广告”（app 启动与切换时同步）：只影响读取时的展示，存储的永远是原文 */
+let cleanSiteText = true;
+export function setCleanSiteText(on: boolean): void {
+  cleanSiteText = on;
+}
+
 /**
- * 读出的章节统一清洗：升级前导入/缓存的正文可能还带着采集站的分页提示和广告，读取时去掉，
- * 不必重新导入或重新获取。清洗幂等、开销很小；与新获取的内容比较“宁多勿少”时两边都是清洗后的。
+ * 展示用的章节：读取时清洗采集站混进正文的分页提示和广告（见 text-clean.ts），已存的旧书/旧缓存
+ * 不必重新导入或获取，关掉设置即可看到原文。“宁多勿少”的比较一律用存储的原文，不用这里的结果。
  */
-function cleanRecord(record: ChapterRecord): ChapterRecord {
+export function viewRecord(record: ChapterRecord): ChapterRecord {
+  if (!cleanSiteText) return record;
   const paragraphs = cleanParagraphs(record.paragraphs);
   if (paragraphs.length === record.paragraphs.length && paragraphs.every((p, i) => p === record.paragraphs[i])) {
     return record;
   }
   return { ...record, paragraphs, charCount: countChars(paragraphs) };
-}
-
-async function readChapter(bookId: string, chapterId: string): Promise<ChapterRecord | null> {
-  const record = await getChapter(bookId, chapterId);
-  return record ? cleanRecord(record) : null;
 }
 
 type UpdateListener = (record: ChapterRecord) => void;
@@ -79,7 +81,7 @@ async function refreshInBackground(bookId: string, chapterId: string, stale: Cha
       (record.complete && !stale.complete);
     if (record.charCount >= stale.charCount && record.paragraphs.length >= stale.paragraphs.length) {
       await putChapter(record).catch(() => undefined);
-      if (better) notifyUpdate(record);
+      if (better) notifyUpdate(viewRecord(record));
     }
   } catch {
     /* 源站不可用：保留已缓存内容 */
@@ -89,8 +91,7 @@ async function refreshInBackground(bookId: string, chapterId: string, stale: Cha
 }
 
 function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
-  // 新版服务端已清洗；旧版服务端/服务端旧缓存可能没有，这里再过一遍（幂等）
-  const paragraphs = cleanParagraphs(data.paragraphs);
+  const paragraphs = data.paragraphs;
   const text = paragraphs.join('');
   const bytes = new TextEncoder().encode(text).length;
   return {
@@ -99,7 +100,7 @@ function toRecord(bookId: string, data: ChapterResult): ChapterRecord {
     chapterId: data.id,
     title: data.title,
     paragraphs,
-    charCount: countChars(paragraphs),
+    charCount: data.charCount,
     source: 'remote',
     fetchedAt: Date.now(),
     bytes,
@@ -129,8 +130,8 @@ export async function loadChapterRecord(
   // 本机书（TXT 导入 / 整本下载）的正文只在 IndexedDB：“重试/重新获取本章”也不联网，
   // 否则会拿到“书号无效/需要整本下载”的错误页盖住正常内容
   if (!isRemoteBookId(bookId)) {
-    const local = await readChapter(bookId, chapterId);
-    if (local) return local;
+    const local = await getChapter(bookId, chapterId);
+    if (local) return viewRecord(local);
     throw new Error(
       isDownloadBookId(bookId)
         ? '这一章不在已下载的内容里，可在“搜索书源”中重新下载整本'
@@ -138,15 +139,15 @@ export async function loadChapterRecord(
     );
   }
   if (!opts.force) {
-    const cached = await readChapter(bookId, chapterId);
+    const cached = await getChapter(bookId, chapterId);
     if (cached) {
       const healthy =
         cached.source === 'local' ||
         (cached.v === CHAPTER_CACHE_VERSION && cached.complete === true);
-      if (healthy) return cached;
+      if (healthy) return viewRecord(cached);
       // 关键：旧/不完整缓存先立即返回，后台静默补全（不再阻塞阅读）
       void refreshInBackground(bookId, chapterId, cached);
-      return cached;
+      return viewRecord(cached);
     }
   }
   const existing = inFlight.get(key);
@@ -162,14 +163,14 @@ export async function loadChapterRecord(
       });
       if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError');
       const record = toRecord(bookId, data);
-      const previous = await readChapter(bookId, chapterId).catch(() => null);
-      if (previous && (previous.charCount > record.charCount || previous.paragraphs.length > record.paragraphs.length)) return previous;
+      const previous = await getChapter(bookId, chapterId).catch(() => null);
+      if (previous && (previous.charCount > record.charCount || previous.paragraphs.length > record.paragraphs.length)) return viewRecord(previous);
       try {
         await putChapter(record);
       } catch {
         /* 存储满时仍返回内容 */
       }
-      return record;
+      return viewRecord(record);
     } catch (err) {
       throw err;
     }

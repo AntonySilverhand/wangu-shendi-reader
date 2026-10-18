@@ -121,8 +121,8 @@ export async function saveLocalBook(
   for (let i = 0; i < chapters.length; i += SAVE_BATCH) {
     const batch: ChapterRecord[] = [];
     for (const chap of chapters.slice(i, i + SAVE_BATCH)) {
-      // 去掉采集站混进正文的分页提示/广告/水印（如“本小章还未完，请点击下一页继续阅读后面精彩内容！”）
-      const paragraphs = cleanParagraphs(chap.paragraphs);
+      // 存原文：采集站的分页提示/广告在读取时按“清理站点广告”设置清洗（chapter.ts），关掉即可看到原文
+      const paragraphs = chap.paragraphs.filter((l) => l.length > 0);
       const info = normalizeTitle(chap.title);
       entries.push({
         id: chap.id,
@@ -255,6 +255,7 @@ export async function importTxtFile(
 export async function exportCachedTxt(
   bookId: string,
   entries: TocEntry[],
+  clean = true,
 ): Promise<{ text: string; count: number }> {
   const records = await listChapters(bookId);
   const byId = new Map(records.map((r) => [r.chapterId, r]));
@@ -263,8 +264,8 @@ export async function exportCachedTxt(
   for (const entry of entries) {
     const rec = byId.get(entry.id);
     if (!rec) continue;
-    // 升级前入库的正文可能还带着站点广告，导出时同样清洗
-    parts.push(`${entry.displayTitle}\n\n${cleanParagraphs(rec.paragraphs).join('\n')}\n`);
+    const paragraphs = clean ? cleanParagraphs(rec.paragraphs) : rec.paragraphs;
+    parts.push(`${entry.displayTitle}\n\n${paragraphs.join('\n')}\n`);
     count++;
   }
   return { text: parts.join('\n'), count };

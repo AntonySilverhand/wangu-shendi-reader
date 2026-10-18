@@ -486,6 +486,14 @@ async function main() {
     const text = document.querySelector('#chapter-content').textContent;
     return document.querySelectorAll('#chapter-content p').length === 30 && !/下一页|www|AiQuxs/.test(text) && text.includes('第 10 段正文。');
   }));
+  // “清理站点广告”开关：关掉后重绘当前章并显示原文（存储的是原文），再打开又清掉
+  await mp.evaluate(() => window.__readerApp.settings.update({ cleanSiteText: false }));
+  await mp.waitForFunction(() => /请点击下一页/.test(document.querySelector('#chapter-content').textContent), null, { timeout: 10_000 });
+  check('关闭“清理站点广告”：当前章立即显示原文（30 段正文 + 1 条分页提示）', await mp.evaluate(() =>
+    document.querySelectorAll('#chapter-content p').length === 31 && /AiQuxs/.test(document.querySelector('#chapter-content').textContent)));
+  await mp.evaluate(() => window.__readerApp.settings.update({ cleanSiteText: true }));
+  await mp.waitForFunction(() => !/请点击下一页/.test(document.querySelector('#chapter-content').textContent), null, { timeout: 10_000 });
+  check('重新打开：广告再次被清理', await mp.evaluate(() => document.querySelectorAll('#chapter-content p').length === 30));
   // 章首点正文收起工具栏：正文上移填补工具栏预留的空白；再显示时退回，标题不被遮挡
   await mp.evaluate(() => window.__readerApp.reader.toggleBars());
   await mp.waitForTimeout(700);
@@ -744,6 +752,12 @@ async function main() {
   check('粘贴已下载书的章节网址直达该章', true);
   check('升级前入库的正文带着广告：读取时清洗（不用重新下载）', await xp.evaluate(() =>
     document.querySelectorAll('#chapter-content p').length === 30 && !/下一页|反馈/.test(document.querySelector('#chapter-content').textContent)));
+  await xp.evaluate(() => window.__readerApp.settings.update({ cleanSiteText: false }));
+  await xp.waitForFunction(() => /请点击下一页/.test(document.querySelector('#chapter-content').textContent), null, { timeout: 10_000 });
+  check('本地书关闭“清理站点广告”：原文还在（入库保存的是原文）', await xp.evaluate(() =>
+    document.querySelectorAll('#chapter-content p').length === 34 && /反馈/.test(document.querySelector('#chapter-content').textContent)));
+  await xp.evaluate(() => window.__readerApp.settings.update({ cleanSiteText: true }));
+  await xp.waitForFunction(() => !/请点击下一页/.test(document.querySelector('#chapter-content').textContent), null, { timeout: 10_000 });
   // 系统返回键（Android 壳调用 window.__onNativeBack）：阅读页 → 书架；书架 → 交给系统
   check('返回键：阅读页回书架', (await xp.evaluate(() => window.__onNativeBack())) === true);
   await xp.waitForSelector('.book-card', { timeout: 10_000 });

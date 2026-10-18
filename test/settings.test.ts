@@ -13,6 +13,16 @@ describe('设置迁移：旧“沉浸式阅读”不再生效', () => {
     expect('immersiveReading' in s).toBe(false);
   });
 
+  it('“清理站点广告”默认开启，可关闭并保存', () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v) });
+    expect(loadSettings().cleanSiteText).toBe(true);
+    data.set(SETTINGS_KEY, JSON.stringify({ cleanSiteText: false }));
+    expect(loadSettings().cleanSiteText).toBe(false);
+    data.set(SETTINGS_KEY, JSON.stringify({ cleanSiteText: 'no' }));
+    expect(loadSettings().cleanSiteText).toBe(true);
+  });
+
   it('新的“阅读时隐藏状态栏”可保存', () => {
     const data = new Map<string, string>([[SETTINGS_KEY, JSON.stringify({ hideStatusBar: true })]]);
     vi.stubGlobal('localStorage', { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v) });

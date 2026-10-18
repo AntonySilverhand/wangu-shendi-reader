@@ -21,6 +21,7 @@ import {
   type TocItemRaw,
 } from '../src/shared/source.ts';
 
+import { cleanParagraphs } from '../src/shared/text-clean.ts';
 const B = '36780';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -314,7 +315,7 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
     ]);
   });
 
-  it('合并后清洗：分页提示与网址水印不进正文（线上书源同样处理）', async () => {
+  it('服务端返回原文（清洗在客户端读取时按设置进行）：分页提示与水印保留，清洗后消失', async () => {
     const encoded = (text: string) =>
       `<script>document.writeln(qsbs.bb('${Buffer.from(`<p>${text}</p>`).toString('base64')}'));</script>`;
     const dirty = html('chapter-38621571-p2.html').replace(
@@ -328,9 +329,11 @@ describe('fetchChapter 集成（真实 fixture + 注入 fetch）', () => {
     };
     const r = await fetchChapter(B, '38621571', { fetcher, ...noRetry });
     expect(r.complete).toBe(true);
-    expect(r.paragraphs).toContain('最后一句。');
-    expect(r.paragraphs.join('\n')).not.toMatch(/下一页|www|AiQuxs/);
+    expect(r.paragraphs.join('\n')).toMatch(/请点击下一页/);
     expect(r.charCount).toBe(r.paragraphs.reduce((n, p) => n + p.length, 0));
+    const cleaned = cleanParagraphs(r.paragraphs);
+    expect(cleaned).toContain('最后一句。');
+    expect(cleaned.join('\n')).not.toMatch(/下一页|www|AiQuxs/);
   });
 
   it('_1 抓取失败：保留已取内容、complete=false、missingPages 记录已知缺口', async () => {

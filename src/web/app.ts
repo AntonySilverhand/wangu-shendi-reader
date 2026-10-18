@@ -17,7 +17,7 @@ import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } fr
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord, purgeOutdatedChapters, subscribeChapterUpdates } from './store/chapter.ts';
+import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates } from './store/chapter.ts';
 import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { saveTextFile } from './save-file.ts';
@@ -218,6 +218,7 @@ export class App {
 
   async start(): Promise<void> {
     applySettings(this.settings.get());
+    setCleanSiteText(this.settings.get().cleanSiteText);
     this.buildShell();
     this.layout.start();
     this.bindEvents();
@@ -241,7 +242,13 @@ export class App {
         void this.renderLoadedChapter(record.chapterId, record, pos);
         showToast('已静默补齐本章后续内容');
       });
-      this.settings.subscribe(() => {
+      let cleaning = this.settings.get().cleanSiteText;
+      this.settings.subscribe((s) => {
+        if (s.cleanSiteText !== cleaning) {
+          cleaning = s.cleanSiteText;
+          setCleanSiteText(cleaning);
+          void this.reloadCurrentChapterView();
+        }
         this.reader.refreshLayout();
         this.updateWakeLock();
         this.syncImmersive();
@@ -710,6 +717,18 @@ export class App {
     );
   }
 
+  /** “清理站点广告”切换后，用同一位置重新渲染当前章（存储的是原文，这里只是换一种展示） */
+  private async reloadCurrentChapterView(): Promise<void> {
+    const chapterId = this.currentChapterId;
+    if (this.view !== 'reader' || !chapterId) return;
+    try {
+      const record = await loadChapterRecord(this.bookId, chapterId);
+      await this.renderLoadedChapter(chapterId, record, this.reader.lastKnownPosition);
+    } catch {
+      /* 章节当前取不到（离线/加载中）：保持现有显示，下次打开章节时按新设置生效 */
+    }
+  }
+
   async openChapter(
     chapterId: string,
     opts: { restorePosition?: boolean; push?: boolean; force?: boolean; anchor?: { paragraph: number; offset: number } } = {},
@@ -1116,7 +1135,7 @@ export class App {
   }
 
   private async handleTxtExport(_from: number, _to: number): Promise<void> {
-    const { text, count } = await exportCachedTxt(this.bookId, this.toc.all);
+    const { text, count } = await exportCachedTxt(this.bookId, this.toc.all, this.settings.get().cleanSiteText);
     if (count === 0) {
       showToast('还没有可导出的缓存章节');
       return;
