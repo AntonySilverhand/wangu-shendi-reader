@@ -36,6 +36,28 @@ function titleKey(text: string): string {
  * 尝试从另一个在线书源获取同一章节。
  * @returns 成功时返回清洗后的章节内容和来源信息；找不到或失败时返回 null
  */
+/**
+ * 依次尝试所有备选在线书源，返回第一个有内容的结果。
+ */
+export async function fetchAltChapterAuto(
+  bookId: string,
+  bookTitle: string,
+  chapterTitle: string,
+  signal?: AbortSignal,
+): Promise<AltChapterResult | null> {
+  const sources = altOnlineSources(bookId);
+  for (const s of sources) {
+    if (signal?.aborted) return null;
+    try {
+      const result = await fetchAltChapter(bookTitle, chapterTitle, s.id, signal);
+      if (result) return result;
+    } catch {
+      /* 单个书源失败不中断，继续下一个 */
+    }
+  }
+  return null;
+}
+
 export async function fetchAltChapter(
   bookTitle: string,
   chapterTitle: string,

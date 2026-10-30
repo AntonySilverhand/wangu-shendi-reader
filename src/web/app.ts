@@ -28,7 +28,7 @@ import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceN
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 import { cleanParagraphs, EMPTY_CHAPTER_NOTE } from '../shared/text-clean.ts';
-import { altOnlineSources, fetchAltChapter } from './store/alt-source.ts';
+import { altOnlineSources, fetchAltChapterAuto } from './store/alt-source.ts';
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
 
@@ -835,17 +835,8 @@ export class App {
         },
       ]);
     } else if (this.isChapterEffectivelyEmpty(record)) {
-      const altSources = altOnlineSources(this.bookId);
-      if (altSources.length > 0) {
-        const chTitle = entry?.title ?? entry?.displayTitle ?? record.title;
-        const bTitle = this.currentBookTitle();
-        this.reader.showBanner(
-          '当前书源暂无本章内容',
-          altSources.map((s) => ({
-            label: `从${s.name}获取`,
-            onClick: () => void this.tryAltSource(bTitle, chTitle, s.id, chapterId),
-          })),
-        );
+      if (altOnlineSources(this.bookId).length > 0) {
+        void this.autoAltSource(chapterId, entry, record);
       }
     }
     this.updateTopbar();
@@ -975,42 +966,35 @@ export class App {
     return cleaned.length === 1 && cleaned[0] === EMPTY_CHAPTER_NOTE;
   }
 
-  private async tryAltSource(
-    bookTitle: string,
-    chapterTitle: string,
-    targetSource: SourceId,
-    originalChapterId: string,
+  private async autoAltSource(
+    chapterId: string,
+    entry: TocEntry | null,
+    originalRecord: ChapterRecord,
   ): Promise<void> {
-    if (this.currentChapterId !== originalChapterId) return;
-    this.reader.showBanner('正在从其他书源获取…');
+    const bookTitle = this.currentBookTitle();
+    const chapterTitle = entry?.title ?? entry?.displayTitle ?? originalRecord.title;
 
     try {
-      const result = await fetchAltChapter(bookTitle, chapterTitle, targetSource);
-      if (this.currentChapterId !== originalChapterId) return;
+      const result = await fetchAltChapterAuto(
+        this.bookId, bookTitle, chapterTitle,
+      );
+      if (this.currentChapterId !== chapterId) return;
 
       if (!result) {
-        this.reader.showBanner('在其他书源中未找到匹配章节', [
-          {
-            label: '搜索此书',
-            onClick: () => {
-              location.hash = `#/search?q=${encodeURIComponent(bookTitle)}&source=${targetSource}`;
-            },
-          },
-        ]);
+        this.reader.showBanner('当前书源暂无本章内容，其他书源也未找到');
         return;
       }
 
-      const entry = this.currentEntry;
-      const index = this.toc.indexOfChapter(originalChapterId);
+      const index = this.toc.indexOfChapter(chapterId);
       const prev = index > 0 ? this.toc.entryAt(index - 1) : null;
       const next = index >= 0 ? this.toc.entryAt(index + 1) : null;
       const prevId = prev?.id ?? null;
       const nextId = next?.id ?? null;
 
       const altRecord: ChapterRecord = {
-        key: `${this.bookId}:${originalChapterId}`,
+        key: `${this.bookId}:${chapterId}`,
         bookId: this.bookId,
-        chapterId: originalChapterId,
+        chapterId,
         title: result.title,
         paragraphs: result.paragraphs,
         charCount: result.charCount,
@@ -1024,22 +1008,15 @@ export class App {
         v: CHAPTER_CACHE_VERSION,
       };
 
-      this.renderedChapterId = originalChapterId;
+      this.renderedChapterId = chapterId;
       this.reader.renderChapter({ record: altRecord, entry, prevId, nextId }, { restore: false });
       this.reader.showBanner(`内容来自${result.sourceName}（不影响原书数据）`);
       this.search.setContent(this.reader.contentElement);
       this.updateTopbar();
       this.updateBottombar(prevId, nextId);
-    } catch (err) {
-      if (this.currentChapterId !== originalChapterId) return;
-      const msg = err instanceof Error ? err.message : '网络错误';
-      this.reader.showBanner(`换源获取失败：${msg}`, [
-        {
-          label: '重试',
-          onClick: () =>
-            void this.tryAltSource(bookTitle, chapterTitle, targetSource, originalChapterId),
-        },
-      ]);
+    } catch {
+      if (this.currentChapterId !== chapterId) return;
+      this.reader.showBanner('当前书源暂无本章内容');
     }
   }
 
