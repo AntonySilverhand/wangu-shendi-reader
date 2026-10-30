@@ -17,8 +17,8 @@ import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } fr
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates } from './store/chapter.ts';
-import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
+import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates, CHAPTER_CACHE_VERSION } from './store/chapter.ts';
+import { listChapterIds, clearBookContent, deleteToc, type ChapterRecord } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { saveTextFile } from './save-file.ts';
 import { setNativeKeepScreenOn } from './native-display.ts';
@@ -27,6 +27,8 @@ import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '..
 import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
+import { cleanParagraphs, EMPTY_CHAPTER_NOTE } from '../shared/text-clean.ts';
+import { altOnlineSources, fetchAltChapter } from './store/alt-source.ts';
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
 
@@ -832,6 +834,19 @@ export class App {
           onClick: () => void this.openChapter(chapterId, { force: true }),
         },
       ]);
+    } else if (this.isChapterEffectivelyEmpty(record)) {
+      const altSources = altOnlineSources(this.bookId);
+      if (altSources.length > 0) {
+        const chTitle = entry?.title ?? entry?.displayTitle ?? record.title;
+        const bTitle = this.currentBookTitle();
+        this.reader.showBanner(
+          '当前书源暂无本章内容',
+          altSources.map((s) => ({
+            label: `从${s.name}获取`,
+            onClick: () => void this.tryAltSource(bTitle, chTitle, s.id, chapterId),
+          })),
+        );
+      }
     }
     this.updateTopbar();
     this.updateBottombar(prevId, nextId);
@@ -948,6 +963,84 @@ export class App {
       );
     }
     this.updateTopbar();
+  }
+
+  /* ----------------------------- 换源 ----------------------------- */
+
+  private isChapterEffectivelyEmpty(record: ChapterRecord): boolean {
+    const paras = record.paragraphs;
+    if (paras.length === 1 && paras[0] === EMPTY_CHAPTER_NOTE) return true;
+    if (paras.length === 0) return true;
+    const cleaned = cleanParagraphs(paras);
+    return cleaned.length === 1 && cleaned[0] === EMPTY_CHAPTER_NOTE;
+  }
+
+  private async tryAltSource(
+    bookTitle: string,
+    chapterTitle: string,
+    targetSource: SourceId,
+    originalChapterId: string,
+  ): Promise<void> {
+    if (this.currentChapterId !== originalChapterId) return;
+    this.reader.showBanner('正在从其他书源获取…');
+
+    try {
+      const result = await fetchAltChapter(bookTitle, chapterTitle, targetSource);
+      if (this.currentChapterId !== originalChapterId) return;
+
+      if (!result) {
+        this.reader.showBanner('在其他书源中未找到匹配章节', [
+          {
+            label: '搜索此书',
+            onClick: () => {
+              location.hash = `#/search?q=${encodeURIComponent(bookTitle)}&source=${targetSource}`;
+            },
+          },
+        ]);
+        return;
+      }
+
+      const entry = this.currentEntry;
+      const index = this.toc.indexOfChapter(originalChapterId);
+      const prev = index > 0 ? this.toc.entryAt(index - 1) : null;
+      const next = index >= 0 ? this.toc.entryAt(index + 1) : null;
+      const prevId = prev?.id ?? null;
+      const nextId = next?.id ?? null;
+
+      const altRecord: ChapterRecord = {
+        key: `${this.bookId}:${originalChapterId}`,
+        bookId: this.bookId,
+        chapterId: originalChapterId,
+        title: result.title,
+        paragraphs: result.paragraphs,
+        charCount: result.charCount,
+        source: 'remote',
+        fetchedAt: Date.now(),
+        bytes: 0,
+        prevId,
+        nextId,
+        missingPages: [],
+        complete: true,
+        v: CHAPTER_CACHE_VERSION,
+      };
+
+      this.renderedChapterId = originalChapterId;
+      this.reader.renderChapter({ record: altRecord, entry, prevId, nextId }, { restore: false });
+      this.reader.showBanner(`内容来自${result.sourceName}（不影响原书数据）`);
+      this.search.setContent(this.reader.contentElement);
+      this.updateTopbar();
+      this.updateBottombar(prevId, nextId);
+    } catch (err) {
+      if (this.currentChapterId !== originalChapterId) return;
+      const msg = err instanceof Error ? err.message : '网络错误';
+      this.reader.showBanner(`换源获取失败：${msg}`, [
+        {
+          label: '重试',
+          onClick: () =>
+            void this.tryAltSource(bookTitle, chapterTitle, targetSource, originalChapterId),
+        },
+      ]);
+    }
   }
 
   /* ----------------------------- 预取 ----------------------------- */
