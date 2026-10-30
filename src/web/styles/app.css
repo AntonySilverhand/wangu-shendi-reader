@@ -599,6 +599,9 @@ button {
   gap: 10px;
   align-items: center;
 }
+.banner[hidden] {
+  display: none;
+}
 .banner.warn {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }

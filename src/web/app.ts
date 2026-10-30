@@ -17,8 +17,8 @@ import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } fr
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates } from './store/chapter.ts';
-import { listChapterIds, clearBookContent, deleteToc } from './store/db.ts';
+import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates, CHAPTER_CACHE_VERSION } from './store/chapter.ts';
+import { listChapterIds, clearBookContent, deleteToc, type ChapterRecord } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { saveTextFile } from './save-file.ts';
 import { setNativeKeepScreenOn } from './native-display.ts';
@@ -27,6 +27,8 @@ import { DEFAULT_BOOK, type BookInfo, type BookSummary, type TocEntry } from '..
 import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceNameOf, type SourceId } from '../shared/sources.ts';
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
+import { cleanParagraphs, EMPTY_CHAPTER_NOTE } from '../shared/text-clean.ts';
+import { altOnlineSources, fetchAltChapterAuto } from './store/alt-source.ts';
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
 
@@ -832,6 +834,10 @@ export class App {
           onClick: () => void this.openChapter(chapterId, { force: true }),
         },
       ]);
+    } else if (this.isChapterEffectivelyEmpty(record)) {
+      if (altOnlineSources(this.bookId).length > 0) {
+        void this.autoAltSource(chapterId, entry, record);
+      }
     }
     this.updateTopbar();
     this.updateBottombar(prevId, nextId);
@@ -948,6 +954,70 @@ export class App {
       );
     }
     this.updateTopbar();
+  }
+
+  /* ----------------------------- 换源 ----------------------------- */
+
+  private isChapterEffectivelyEmpty(record: ChapterRecord): boolean {
+    const paras = record.paragraphs;
+    if (paras.length === 1 && paras[0] === EMPTY_CHAPTER_NOTE) return true;
+    if (paras.length === 0) return true;
+    const cleaned = cleanParagraphs(paras);
+    return cleaned.length === 1 && cleaned[0] === EMPTY_CHAPTER_NOTE;
+  }
+
+  private async autoAltSource(
+    chapterId: string,
+    entry: TocEntry | null,
+    originalRecord: ChapterRecord,
+  ): Promise<void> {
+    const bookTitle = this.currentBookTitle();
+    const chapterTitle = entry?.title ?? entry?.displayTitle ?? originalRecord.title;
+
+    try {
+      const result = await fetchAltChapterAuto(
+        this.bookId, bookTitle, chapterTitle,
+      );
+      if (this.currentChapterId !== chapterId) return;
+
+      if (!result) {
+        this.reader.showBanner('当前书源暂无本章内容，其他书源也未找到');
+        return;
+      }
+
+      const index = this.toc.indexOfChapter(chapterId);
+      const prev = index > 0 ? this.toc.entryAt(index - 1) : null;
+      const next = index >= 0 ? this.toc.entryAt(index + 1) : null;
+      const prevId = prev?.id ?? null;
+      const nextId = next?.id ?? null;
+
+      const altRecord: ChapterRecord = {
+        key: `${this.bookId}:${chapterId}`,
+        bookId: this.bookId,
+        chapterId,
+        title: result.title,
+        paragraphs: result.paragraphs,
+        charCount: result.charCount,
+        source: 'remote',
+        fetchedAt: Date.now(),
+        bytes: 0,
+        prevId,
+        nextId,
+        missingPages: [],
+        complete: true,
+        v: CHAPTER_CACHE_VERSION,
+      };
+
+      this.renderedChapterId = chapterId;
+      this.reader.renderChapter({ record: altRecord, entry, prevId, nextId }, { restore: false });
+      this.reader.showBanner(`内容来自${result.sourceName}（不影响原书数据）`);
+      this.search.setContent(this.reader.contentElement);
+      this.updateTopbar();
+      this.updateBottombar(prevId, nextId);
+    } catch {
+      if (this.currentChapterId !== chapterId) return;
+      this.reader.showBanner('当前书源暂无本章内容');
+    }
   }
 
   /* ----------------------------- 预取 ----------------------------- */
