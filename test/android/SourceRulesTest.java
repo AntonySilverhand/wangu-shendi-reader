@@ -108,6 +108,30 @@ public final class SourceRulesTest {
     check(SourceRules.isIxdzsBookId("ixdzs-137695"), true, "ix id");
     check(SourceRules.isIxdzsBookId("ixdzs-x"), false, "ix bad id fmt");
     check(SourceRules.coverUrl("ixdzs-137695") == null, true, "ix has no id-based cover");
+    // 飘天文学：书页/目录/章节（分片 a 必须等于 b/1000）、POST 搜索、封面
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/bookinfo/7/7906.html")), true, "pt info");
+    check(SourceRules.allowedPage(u("http://www.piaotia.com/bookinfo/7/7906.html")), true, "pt info http (search redirect)");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/7/7906/")), true, "pt toc");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/7/7906/index.html")), true, "pt toc index");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/7/7906/9852372.html")), true, "pt chapter");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/0/246/138980.html")), true, "pt small book");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/8/7906/9852372.html")), false, "pt wrong shard");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/bookinfo/6/7906.html")), false, "pt info wrong shard");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/7/7906/9852372.html?x=1")), false, "pt query");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/html/7/7906/a.html")), false, "pt non-numeric chapter");
+    check(SourceRules.allowedPage(u("https://www.piaotia.com/modules/article/addbookcase.php")), false, "pt other page");
+    check(SourceRules.allowedPage(u("https://evil.piaotia.com.example/html/7/7906/")), false, "pt lookalike host");
+    URL ptSearch = u("https://www.piaotia.com/modules/article/search.php");
+    check(SourceRules.allowedSearch(ptSearch, "searchtype=articlename&searchkey=%CD%F2%B9%C5%C9%F1%B5%DB"), true, "pt search");
+    check(SourceRules.allowedSearch(ptSearch, "searchkey=%CD%F2&searchtype=all"), false, "pt 69shuba form");
+    check(SourceRules.allowedSearch(ptSearch, "searchtype=author&searchkey=%CD%F2"), false, "pt author search");
+    check(SourceRules.allowedSearch(ptSearch, "searchtype=articlename&searchkey=a&x=1"), false, "pt extra field");
+    check(SourceRules.isPiaotiaBookId("piaotia-7906"), true, "pt id");
+    check(SourceRules.isPiaotiaBookId("piaotia-0"), false, "pt bad id");
+    check("https://www.piaotia.com/files/article/image/7/7906/7906s.jpg".equals(SourceRules.coverUrl("piaotia-7906")), true, "pt cover url");
+    check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/7/7906/7906s.jpg")), true, "pt cover");
+    check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/7/7906/7907s.jpg")), false, "pt cover mismatch");
+    check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/1/7906/7906s.jpg")), false, "pt cover shard");
 
     // 字符集：Content-Type 优先，其次 meta，未知标签按 utf-8
     check("gbk".equals(SourceRules.charsetOf("text/html; charset=GBK", null)), true, "charset header");

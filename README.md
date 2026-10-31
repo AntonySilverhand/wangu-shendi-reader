@@ -1,6 +1,6 @@
 # 万书阅读器 · 个人小说阅读器
 
-一个干净、专注、适合长时间阅读的**个人**小说阅读网站。可在书源（万书阁、69书吧、爱下电子书）中**按书名/作者搜索并阅读任意小说**，也可直接粘贴书籍/章节网址打开，书架管理多本书（含本地导入的 TXT 与整本下载的书）；预置书为《万古神帝》（book 36780）。正文是视觉中心，手机优先，同时适配折叠屏、平板、桌面与外接显示器。
+一个干净、专注、适合长时间阅读的**个人**小说阅读网站。可在书源（万书阁、69书吧、飘天文学、爱下电子书）中**按书名/作者搜索并阅读任意小说**，也可直接粘贴书籍/章节网址打开，书架管理多本书（含本地导入的 TXT 与整本下载的书）；预置书为《万古神帝》（book 36780）。正文是视觉中心，手机优先，同时适配折叠屏、平板、桌面与外接显示器。
 
 > 声明：本项目仅供个人阅读使用。正文按需从公开书源获取并缓存在使用者本机，不打包、不再分发正文内容。书源结构可能变化，适配层已与阅读器解耦，便于单独修复。
 
@@ -54,7 +54,7 @@ public/           # manifest、Service Worker、图标
 test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 ```
 
-**解耦**：书源结构只出现在书源适配文件（万书阁 `src/shared/source.ts`、69书吧 `src/shared/source-69shuba.ts`），`src/shared/sources.ts` 按书号分派。若书源改版，只需更新对应文件的解析函数与 fixture 测试；正文清洗、存储、阅读界面均不受影响。
+**解耦**：书源结构只出现在书源适配文件（万书阁 `src/shared/source.ts`、69书吧 `src/shared/source-69shuba.ts`、飘天文学 `src/shared/source-piaotia.ts`、爱下电子书 `src/shared/source-ixdzs.ts`），`src/shared/sources.ts` 按书号分派。若书源改版，只需更新对应文件的解析函数与 fixture 测试；正文清洗、存储、阅读界面均不受影响。
 
 ---
 
@@ -85,6 +85,19 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 - 搜索：`POST /modules/article/search.php`，表单 `searchkey=<GBK 百分号编码>&searchtype=all`；唯一结果时源站直接跳详情页，也能解析。封面在 `static.69shuba.com/files/article/image/{n/1000}/{n}/{n}s.jpg`。
 - **该站整站前置 Cloudflare**。开发环境（云端机房 IP）访问任何页面都只拿到人机验证页，因此解析器是按已知模板写的，fixture 为合成样例（见 `test/fixtures/69shuba/README.md`），**尚未用真实页面验证**；封面图床可正常访问。遇到人机验证时接口返回 `code: "blocked"` 与中文提示，阅读器原样展示，**不尝试绕过**。是否可用取决于取书的网络（自托管服务器 / Worker / 手机）是否被源站放行。
 
+**飘天文学（www.piaotia.com）**：
+
+- 书号写作 `piaotia-{源站书号}`（如 `piaotia-7906`）。jieqi 模板、**GBK 编码**，正文是纯 HTML（无脚本加密、目前无人机验证），开发环境实测可直接访问。
+- 详情页 `/bookinfo/{a}/{n}.html`、目录页 `/html/{a}/{n}/`（单页，`div.centent` 内按卷分组的 `ul > li > a`）、章节页 `/html/{a}/{n}/{章节号}.html`（`&nbsp;` 缩进 + `<br>`，不分页），其中 `{a} = ⌊n/1000⌋`。搜索为 `POST /modules/article/search.php`，表单 `searchtype=articlename&searchkey=<GBK 编码书名>`，唯一结果时跳详情页。
+- 实测《万古神帝》（piaotia-7906）：4215 章；万书阁/爱下电子书里是占位文字的第 3578、3579、3582、3583、3595、3602 章在这里都有完整正文。
+
+**自动换源补全占位章**：
+
+- 采集站常把“本章节内容正在手打中…”这类占位文字当正文上传。阅读器识别到占位章（清洗后只剩“本章在来源中没有正文”）时，自动依次尝试：本机已有的同名书（整本下载/导入）→ 飘天文学 → 万书阁 → 69书吧（排除当前书源），取到正文就直接替换显示，章首一行说明来源；下一章是占位章时在预取阶段提前换源，翻页即显示。
+- 实测各站章节号经常对不上（同一章“第3579章 回城”在别站是“第三千五百五十八章 回城”，“第3595章 谋未来”在飘天文学是“第三千六百六十四章”），所以按**章名**匹配，同名时按全书相对位置取最近的一章；书名必须一致、作者已知时必须一致。爱下电子书 4259 章对飘天文学目录逐章匹配，4213 章命中、无错配。
+- 换源内容只用于展示，不写入缓存、不改原书目录/进度/书签；仍按“清理站点广告”设置清洗。
+- 不同站点的整本 TXT 并不能互相补洞：爱下电子书的简体与繁体（`_tw`）压缩包是同一份内容的繁简转换（4259 章逐章段落数一致，6 个占位章完全相同），万书阁与它同源、占位章也相同。
+
 **爱下电子书（ixdzs8.com，整本下载型）**：
 
 - 书号写作 `ixdzs-{源站书号}`。书页 `/read/{n}/` 一次给出书籍信息与完整目录，搜索为 `GET /bsearch?q=`，都可正常访问。
@@ -93,8 +106,8 @@ test/             # 单元测试 + 真实 HTML fixture + e2e.mjs
 
 **后端接口限制**（防止成为任意 URL 代理）：
 
-- 只接受 `/api/chapter?book=<书号>&id=<1-12 位数字>`、`/api/toc?book=<书号>&from=&to=`（跨度 ≤ 6、页码 ≤ 999）、`/api/search?q=<1-30 字>&source=<wanshuge|69shuba|ixdzs>`、`/api/health`；`book` 缺省为预置书（兼容旧客户端），书号须为 1–9 位数字或 `69shuba-`/`ixdzs-`+1–9 位数字（`ixdzs-` 书的 `/api/chapter` 直接拒绝，需整本下载）。
-- URL 只能由固定 origin + 校验过的书号/章节号拼接（搜索只能是固定的 `/search.html` + `s=` 表单或 `/modules/article/search.php` + `searchkey=&searchtype=all` 表单）；跟随重定向后再次校验 host 必须属于该书源（`wanshuge.org` / `www.69shuba.com`）；校验 `content-type`、响应体大小上限；不透明地丢弃非正文内容（广告、跟踪脚本从不进入存储）。
+- 只接受 `/api/chapter?book=<书号>&id=<1-12 位数字>`、`/api/toc?book=<书号>&from=&to=`（跨度 ≤ 6、页码 ≤ 999）、`/api/search?q=<1-30 字>&source=<wanshuge|69shuba|ixdzs|piaotia>`、`/api/health`；`book` 缺省为预置书（兼容旧客户端），书号须为 1–9 位数字或 `69shuba-`/`ixdzs-`/`piaotia-`+1–9 位数字（`ixdzs-` 书的 `/api/chapter` 直接拒绝，需整本下载）。
+- URL 只能由固定 origin + 校验过的书号/章节号拼接（搜索只能是固定的 `/search.html` + `s=` 表单，或 `/modules/article/search.php` + `searchkey=&searchtype=all`（69书吧）/ `searchtype=articlename&searchkey=`（飘天文学）表单）；跟随重定向后再次校验 host 必须属于该书源（`wanshuge.org` / `www.69shuba.com` / `www.piaotia.com`）；校验 `content-type`、响应体大小上限；不透明地丢弃非正文内容（广告、跟踪脚本从不进入存储）。
 - 未实现：登录、付费、验证码、Cloudflare 人机验证绕过的任何逻辑。
 
 ---

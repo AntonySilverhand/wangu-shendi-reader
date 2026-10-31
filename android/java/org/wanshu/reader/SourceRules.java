@@ -15,8 +15,10 @@ import java.util.regex.Pattern;
  *    POST /modules/article/search.php（searchkey=GBK 编码&searchtype=all）、
  *    static.69shuba.com/files/article/image/{b/1000}/{b}/{b}s.jpg；
  *  - 爱下电子书（整本下载型）：书页 /read/{b}/、GET /bsearch?q=已编码关键词、
- *    整本压缩包 down7.ixdzs8.com/{b}.zip（章节页有安全验证，不访问）。
- * 与 src/shared/source.ts、source-69shuba.ts、source-ixdzs.ts 保持同一白名单。
+ *    整本压缩包 down7.ixdzs8.com/{b}.zip（章节页有安全验证，不访问）；
+ *  - 飘天文学：/bookinfo/{a}/{b}.html、/html/{a}/{b}/（含 index.html）、/html/{a}/{b}/{id}.html（{a} = b/1000）、
+ *    POST /modules/article/search.php（searchtype=articlename&searchkey=GBK 编码）、/files/article/image/{a}/{b}/{b}s.jpg。
+ * 与 src/shared/source.ts、source-69shuba.ts、source-ixdzs.ts、source-piaotia.ts 保持同一白名单。
  */
 public final class SourceRules {
   public static final String USER_AGENT =
@@ -26,6 +28,7 @@ public final class SourceRules {
   public static final String SHUBA_PREFIX = "69shuba-";
   public static final String IXDZS_PREFIX = "ixdzs-";
   public static final String IXDZS_SEARCH_PATH = "/bsearch";
+  public static final String PIAOTIA_PREFIX = "piaotia-";
 
   private static final String BOOK = "[1-9][0-9]{0,8}";
   private static final String PAGE_PATH =
@@ -45,6 +48,13 @@ public final class SourceRules {
   private static final String IXDZS_PAGE_PATH = "/read/" + BOOK + "/";
   private static final String IXDZS_SEARCH_QUERY = "q=[A-Za-z0-9%._~!*'()-]{1,400}";
   private static final String IXDZS_DOWNLOAD_PATH = "/" + BOOK + "\\.zip";
+  private static final Pattern PIAOTIA_BOOK_ID = Pattern.compile("piaotia-(" + BOOK + ")");
+  /** group(1) = 分片 a，group(2) = 书号 b（调用方校验 a == b/1000） */
+  private static final Pattern PIAOTIA_PAGE_PATH = Pattern.compile(
+      "/(?:bookinfo/([0-9]{1,6})/(" + BOOK + ")\\.html|html/([0-9]{1,6})/(" + BOOK + ")/(?:index\\.html|[0-9]{1,12}\\.html)?)");
+  private static final Pattern PIAOTIA_COVER_PATH =
+      Pattern.compile("/files/article/image/([0-9]{1,6})/(" + BOOK + ")/([0-9]{1,9})s\\.jpg");
+  private static final String PIAOTIA_FORM = "searchtype=articlename&searchkey=[A-Za-z0-9%._~!*'()-]{1,600}";
   private static final Pattern CHARSET = Pattern.compile("charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)",
       Pattern.CASE_INSENSITIVE);
   private static final Pattern META_CHARSET = Pattern.compile(
@@ -82,6 +92,26 @@ public final class SourceRules {
     return plainOrigin(url, "ixdzs8.com") || plainOrigin(url, "www.ixdzs8.com");
   }
 
+  public static boolean allowedPiaotiaOrigin(URL url) {
+    return plainOrigin(url, "www.piaotia.com") || plainOrigin(url, "piaotia.com");
+  }
+
+  /** 飘天文学书号（piaotia-数字） */
+  public static boolean isPiaotiaBookId(String id) {
+    return id != null && PIAOTIA_BOOK_ID.matcher(id).matches();
+  }
+
+  private static boolean shardMatches(String shard, String book) {
+    return Long.parseLong(shard) == Long.parseLong(book) / 1000;
+  }
+
+  private static boolean allowedPiaotiaPage(URL url) {
+    if (url.getQuery() != null) return false;
+    Matcher m = PIAOTIA_PAGE_PATH.matcher(url.getPath());
+    if (!m.matches()) return false;
+    return m.group(1) != null ? shardMatches(m.group(1), m.group(2)) : shardMatches(m.group(3), m.group(4));
+  }
+
   /** 爱下电子书书号（ixdzs-数字） */
   public static boolean isIxdzsBookId(String id) {
     return id != null && IXDZS_BOOK_ID.matcher(id).matches();
@@ -92,6 +122,7 @@ public final class SourceRules {
     if (allowedOrigin(url)) return url.getPath().matches(PAGE_PATH);
     if (allowedShubaOrigin(url)) return url.getPath().matches(SHUBA_PAGE_PATH);
     if (allowedIxdzsOrigin(url)) return url.getQuery() == null && url.getPath().matches(IXDZS_PAGE_PATH);
+    if (allowedPiaotiaOrigin(url)) return allowedPiaotiaPage(url);
     return false;
   }
 
@@ -118,6 +149,7 @@ public final class SourceRules {
     if (form == null || url.getQuery() != null) return false;
     if (allowedOrigin(url)) return SEARCH_PATH.equals(url.getPath()) && form.matches(FORM);
     if (allowedShubaOrigin(url)) return SHUBA_SEARCH_PATH.equals(url.getPath()) && form.matches(SHUBA_FORM);
+    if (allowedPiaotiaOrigin(url)) return SHUBA_SEARCH_PATH.equals(url.getPath()) && form.matches(PIAOTIA_FORM);
     return false;
   }
 
@@ -130,6 +162,10 @@ public final class SourceRules {
       if (!m.matches() || !m.group(2).equals(m.group(3))) return false;
       return Long.parseLong(m.group(1)) == Long.parseLong(m.group(2)) / 1000;
     }
+    if (plainOrigin(url, "www.piaotia.com")) {
+      Matcher m = PIAOTIA_COVER_PATH.matcher(url.getPath());
+      return m.matches() && m.group(2).equals(m.group(3)) && shardMatches(m.group(1), m.group(2));
+    }
     return false;
   }
 
@@ -139,6 +175,11 @@ public final class SourceRules {
     if (isShubaBookId(bookId)) {
       String n = bookId.substring(SHUBA_PREFIX.length());
       return "https://static.69shuba.com/files/article/image/" + (Long.parseLong(n) / 1000)
+          + "/" + n + "/" + n + "s.jpg";
+    }
+    if (isPiaotiaBookId(bookId)) {
+      String n = bookId.substring(PIAOTIA_PREFIX.length());
+      return "https://www.piaotia.com/files/article/image/" + (Long.parseLong(n) / 1000)
           + "/" + n + "/" + n + "s.jpg";
     }
     return null;

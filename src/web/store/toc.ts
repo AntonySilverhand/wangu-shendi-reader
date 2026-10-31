@@ -349,6 +349,11 @@ export class TocStore {
     return this.main.length;
   }
 
+  /** 已加载的全部条目数（含番外；与 indexOfChapter 的下标同一坐标） */
+  get allCount(): number {
+    return this.all.length;
+  }
+
   /** 章内/目录搜索：支持标题、章节号、章节 id */
   search(query: string, limit = 60): TocSearchResult[] {
     const q = query.trim();

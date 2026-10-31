@@ -17,8 +17,8 @@ import { isNativeDisplayAvailable, setNativeImmersive, onNativeInsetsChange } fr
 import { PersonalStore, type Bookmark, type ReadingPosition } from './store/personal.ts';
 import { TocStore } from './store/toc.ts';
 import { DownloadManager } from './store/download.ts';
-import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates, CHAPTER_CACHE_VERSION } from './store/chapter.ts';
-import { listChapterIds, clearBookContent, deleteToc, type ChapterRecord } from './store/db.ts';
+import { loadChapterRecord, purgeOutdatedChapters, setCleanSiteText, subscribeChapterUpdates, viewRecord, CHAPTER_CACHE_VERSION } from './store/chapter.ts';
+import { listChapterIds, clearBookContent, deleteToc, getChapter, type ChapterRecord } from './store/db.ts';
 import { importTxtFile, exportCachedTxt, listLocalBooks, TXT_ACCEPT, type LocalBookMeta } from './store/txt.ts';
 import { saveTextFile } from './save-file.ts';
 import { setNativeKeepScreenOn } from './native-display.ts';
@@ -28,7 +28,7 @@ import { DEFAULT_SOURCE, isDownloadBookId, isSourceId, placeholderTitle, sourceN
 import { excerpt, formatTime } from './format.ts';
 import { LayoutController } from './layout.ts';
 import { cleanParagraphs, EMPTY_CHAPTER_NOTE } from '../shared/text-clean.ts';
-import { altOnlineSources, fetchAltChapterAuto } from './store/alt-source.ts';
+import { cachedAltChapter, fetchAltChapterAuto, hasAltSources, type AltChapterResult } from './store/alt-source.ts';
 
 const LOCAL_BOOKS_KEY = 'reader.localbooks.v1';
 
@@ -819,8 +819,13 @@ export class App {
     const prevId = prev?.id ?? record.prevId ?? null;
     const nextId = next?.id ?? record.nextId ?? null;
 
+    // 占位章：本次会话已换源取到的正文直接显示（不闪占位文字）；没取过的后台自动换源
+    const placeholder = this.isChapterEffectivelyEmpty(record) && hasAltSources(this.bookId, this.currentBookTitle());
+    const alt = placeholder ? cachedAltChapter(this.bookId, chapterId) : undefined;
+    const shown = alt ? this.altViewRecord(record, alt, prevId, nextId) : record;
+
     this.reader.setInitialPosition(restore);
-    this.reader.renderChapter({ record, entry, prevId, nextId }, { restore: restore !== null });
+    this.reader.renderChapter({ record: shown, entry, prevId, nextId }, { restore: restore !== null });
     this.savePosition(restore ?? { paragraph: 0, offset: 0 });
     this.search.setContent(this.reader.contentElement);
     // 章首提示只用于影响阅读的异常（内容不全）；“本地导入”“离线阅读中”之类的状态说明不再显示——
@@ -834,10 +839,13 @@ export class App {
           onClick: () => void this.openChapter(chapterId, { force: true }),
         },
       ]);
-    } else if (this.isChapterEffectivelyEmpty(record)) {
-      if (altOnlineSources(this.bookId).length > 0) {
-        void this.autoAltSource(chapterId, entry, record);
-      }
+    } else if (alt) {
+      this.reader.showBanner(`本章在当前书源只有占位文字，内容来自${alt.sourceName}`);
+    } else if (alt === null) {
+      this.reader.showBanner('当前书源暂无本章内容，其他书源也未找到');
+    } else if (placeholder) {
+      this.reader.showBanner('当前书源暂无本章内容，正在从其他书源补全…');
+      void this.autoAltSource(chapterId, entry, record, index);
     }
     this.updateTopbar();
     this.updateBottombar(prevId, nextId);
@@ -966,75 +974,126 @@ export class App {
     return cleaned.length === 1 && cleaned[0] === EMPTY_CHAPTER_NOTE;
   }
 
-  private async autoAltSource(
-    chapterId: string,
-    entry: TocEntry | null,
-    originalRecord: ChapterRecord,
-  ): Promise<void> {
-    const bookTitle = this.currentBookTitle();
-    const chapterTitle = entry?.title ?? entry?.displayTitle ?? originalRecord.title;
+  /** 换源请求：原书书名/作者 + 本章标题 + 本章在目录中的相对位置（用于同名章节消歧） */
+  private altRequest(chapterId: string, entry: TocEntry | null, record: ChapterRecord, index: number) {
+    const count = this.toc.allCount;
+    return {
+      bookId: this.bookId,
+      bookTitle: this.currentBookTitle(),
+      author: this.currentBookAuthorOrEmpty(),
+      chapterId,
+      chapterTitle: entry?.title ?? entry?.displayTitle ?? record.title,
+      position: index >= 0 && count > 1 ? Math.min(1, index / (count - 1)) : null,
+    };
+  }
 
-    try {
-      const result = await fetchAltChapterAuto(
-        this.bookId, bookTitle, chapterTitle,
-      );
-      if (this.currentChapterId !== chapterId) return;
+  private currentBookAuthorOrEmpty(): string {
+    const author = this.currentBookAuthor();
+    return author === '佚名' || author === '本地导入' ? '' : author;
+  }
 
-      if (!result) {
-        this.reader.showBanner('当前书源暂无本章内容，其他书源也未找到');
-        return;
-      }
+  /** 换源结果包装成本章记录（书号/章节号仍是原书的，只用于展示），并按设置清洗 */
+  private altViewRecord(record: ChapterRecord, alt: AltChapterResult, prevId: string | null, nextId: string | null): ChapterRecord {
+    return viewRecord({
+      ...record,
+      paragraphs: alt.paragraphs,
+      charCount: alt.charCount,
+      prevId,
+      nextId,
+      missingPages: [],
+      complete: true,
+      restricted: false,
+      v: CHAPTER_CACHE_VERSION,
+    });
+  }
 
-      const index = this.toc.indexOfChapter(chapterId);
-      const prev = index > 0 ? this.toc.entryAt(index - 1) : null;
-      const next = index >= 0 ? this.toc.entryAt(index + 1) : null;
-      const prevId = prev?.id ?? null;
-      const nextId = next?.id ?? null;
+  /** 书名是否已知（目录/书籍信息到达前是“书号 N”之类的占位名，不能拿去搜索） */
+  private bookTitleKnown(): boolean {
+    const title = this.currentBookTitle();
+    return title !== placeholderTitle(this.bookId) && title !== '本地书籍';
+  }
 
-      const altRecord: ChapterRecord = {
-        key: `${this.bookId}:${chapterId}`,
-        bookId: this.bookId,
-        chapterId,
-        title: result.title,
-        paragraphs: result.paragraphs,
-        charCount: result.charCount,
-        source: 'remote',
-        fetchedAt: Date.now(),
-        bytes: 0,
-        prevId,
-        nextId,
-        missingPages: [],
-        complete: true,
-        v: CHAPTER_CACHE_VERSION,
-      };
+  /** 等书名与本章在目录中的位置就绪（直接打开章节时正文可能先于目录到达）；最多等 15 秒 */
+  private waitForAltContext(chapterId: string): Promise<boolean> {
+    const ready = () => this.bookTitleKnown() && this.toc.indexOfChapter(chapterId) >= 0;
+    if (ready()) return Promise.resolve(true);
+    const toc = this.toc;
+    return new Promise((resolve) => {
+      let off: () => void = () => undefined;
+      const timer = setTimeout(() => {
+        off();
+        resolve(this.bookTitleKnown());
+      }, 15_000);
+      off = toc.subscribe(() => {
+        if (!ready()) return;
+        clearTimeout(timer);
+        off();
+        resolve(true);
+      });
+    });
+  }
 
-      this.renderedChapterId = chapterId;
-      this.reader.renderChapter({ record: altRecord, entry, prevId, nextId }, { restore: false });
-      this.reader.showBanner(`内容来自${result.sourceName}（不影响原书数据）`);
-      this.search.setContent(this.reader.contentElement);
-      this.updateTopbar();
-      this.updateBottombar(prevId, nextId);
-    } catch {
-      if (this.currentChapterId !== chapterId) return;
+  private async autoAltSource(chapterId: string, entry: TocEntry | null, record: ChapterRecord, index: number): Promise<void> {
+    const bookId = this.bookId;
+    const stale = () => this.disposed || this.bookId !== bookId || this.currentChapterId !== chapterId || this.renderedChapterId !== chapterId;
+    const ready = await this.waitForAltContext(chapterId);
+    if (stale()) return;
+    if (!ready) {
       this.reader.showBanner('当前书源暂无本章内容');
+      return;
     }
+    const idx = this.toc.indexOfChapter(chapterId);
+    const result = await fetchAltChapterAuto(this.altRequest(chapterId, idx >= 0 ? this.toc.entryAt(idx) : entry, record, idx >= 0 ? idx : index)).catch(() => null);
+    if (stale()) return;
+    if (!result) {
+      this.reader.showBanner('当前书源暂无本章内容，其他书源也未找到');
+      return;
+    }
+    // 重新走一遍渲染流程（命中换源缓存），保持阅读位置
+    this.renderLoadedChapter(chapterId, record, this.reader.lastKnownPosition);
+  }
+
+  /** 预取到的下一章是占位章时，提前换源（结果进会话缓存，翻页时直接显示） */
+  private warmAltSource(chapterId: string, record: ChapterRecord): void {
+    if (!this.bookTitleKnown() || !this.isChapterEffectivelyEmpty(record) || !hasAltSources(this.bookId, this.currentBookTitle())) return;
+    if (cachedAltChapter(this.bookId, chapterId) !== undefined) return;
+    const index = this.toc.indexOfChapter(chapterId);
+    const entry = index >= 0 ? this.toc.entryAt(index) : null;
+    void fetchAltChapterAuto(this.altRequest(chapterId, entry, record, index)).catch(() => null);
   }
 
   /* ----------------------------- 预取 ----------------------------- */
 
   private schedulePrefetch(nextId: string | null): void {
     this.cancelPrefetch();
-    if (!nextId || !isRemoteBookId(this.bookId)) return;
+    if (!nextId) return;
     if (!this.settings.get().prefetch) return;
     const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
     if (conn?.saveData) return;
     if (conn?.effectiveType && /(^|-)2g$/.test(conn.effectiveType)) return;
+    const bookId = this.bookId;
+    if (!isRemoteBookId(bookId)) {
+      // 本机书不发章节请求；只在下一章是占位章时提前换源
+      this.prefetchTimer = setTimeout(() => {
+        this.prefetchTimer = null;
+        if (document.hidden) return;
+        void getChapter(bookId, nextId)
+          .then((record) => {
+            if (record && this.bookId === bookId) this.warmAltSource(nextId, record);
+          })
+          .catch(() => undefined);
+      }, 1600);
+      return;
+    }
     this.prefetchTimer = setTimeout(() => {
       this.prefetchTimer = null;
       if (document.hidden) return;
       this.prefetchController = new AbortController();
       void loadChapterRecord(this.bookId, nextId, { signal: this.prefetchController.signal, background: true })
-        .then(() => this.refreshCachedIds())
+        .then((record) => {
+          if (this.bookId === bookId) this.warmAltSource(nextId, record);
+          return this.refreshCachedIds();
+        })
         .catch(() => undefined);
     }, 1600);
   }

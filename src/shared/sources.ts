@@ -5,6 +5,7 @@
  *   - 纯数字（/^[1-9]\d{0,8}$/）      → 万书阁（兼容升级前的全部数据）
  *   - `69shuba-{数字}`               → 69书吧
  *   - `ixdzs-{数字}`                 → 爱下电子书（整本下载型：下载后作为离线书保存）
+ *   - `piaotia-{数字}`               → 飘天文学
  *   - `local-xxx`                    → 本地导入书（不属于任何书源）
  *
  * 书源有两种模式：online（逐章在线获取，isRemoteBookId 为真）与 download
@@ -43,8 +44,18 @@ import {
   ixdzsNumber,
   searchIxdzs,
 } from './source-ixdzs.ts';
+import {
+  fetchPiaotiaChapter,
+  fetchPiaotiaTocRange,
+  isPiaotiaBookId,
+  PIAOTIA,
+  piaotiaBookId,
+  piaotiaCoverUrl,
+  piaotiaNumber,
+  searchPiaotia,
+} from './source-piaotia.ts';
 
-export type SourceId = 'wanshuge' | '69shuba' | 'ixdzs';
+export type SourceId = 'wanshuge' | '69shuba' | 'ixdzs' | 'piaotia';
 
 export interface SourceMeta {
   id: SourceId;
@@ -58,6 +69,7 @@ export const SOURCES: readonly SourceMeta[] = [
   { id: 'wanshuge', name: SITE.name, host: 'wanshuge.org', mode: 'online' },
   { id: '69shuba', name: SHUBA.name, host: 'www.69shuba.com', mode: 'online' },
   { id: 'ixdzs', name: IXDZS.name, host: 'ixdzs8.com', mode: 'download' },
+  { id: 'piaotia', name: PIAOTIA.name, host: 'www.piaotia.com', mode: 'online' },
 ];
 
 export const DEFAULT_SOURCE: SourceId = 'wanshuge';
@@ -75,6 +87,7 @@ export function sourceOfBook(bookId: string | null | undefined): SourceId | null
   if (isValidBookId(bookId)) return 'wanshuge';
   if (isShubaBookId(bookId)) return '69shuba';
   if (isIxdzsBookId(bookId)) return 'ixdzs';
+  if (isPiaotiaBookId(bookId)) return 'piaotia';
   return null;
 }
 
@@ -105,6 +118,7 @@ export function sourceNameOf(bookId: string): string | null {
 export function sourceBookNumber(bookId: string): string {
   if (isShubaBookId(bookId)) return shubaNumber(bookId);
   if (isIxdzsBookId(bookId)) return ixdzsNumber(bookId);
+  if (isPiaotiaBookId(bookId)) return piaotiaNumber(bookId);
   return bookId;
 }
 
@@ -121,6 +135,8 @@ export function bookCoverUrl(bookId: string): string | null {
       return coverUrl(bookId);
     case '69shuba':
       return shubaCoverUrl(bookId);
+    case 'piaotia':
+      return piaotiaCoverUrl(bookId);
     default:
       return null;
   }
@@ -134,11 +150,13 @@ export function fetchBookTocRange(
 ): Promise<TocRangeResult> {
   if (isShubaBookId(bookId)) return fetchShubaTocRange(bookId, from, to, opts);
   if (isIxdzsBookId(bookId)) return fetchIxdzsTocRange(bookId, from, to, opts);
+  if (isPiaotiaBookId(bookId)) return fetchPiaotiaTocRange(bookId, from, to, opts);
   return fetchTocRange(bookId, from, to, opts);
 }
 
 export async function fetchBookChapter(bookId: string, chapterId: string, opts: FetchOptions = {}): Promise<ChapterResult> {
   if (isShubaBookId(bookId)) return fetchShubaChapter(bookId, chapterId, opts);
+  if (isPiaotiaBookId(bookId)) return fetchPiaotiaChapter(bookId, chapterId, opts);
   if (isDownloadBookId(bookId)) {
     // 站点章节页有安全验证（不绕过）：只能整本下载后离线阅读，不发上游请求
     throw new SourceError(`${sourceNameOf(bookId)}的书需要先整本下载，下载后可离线阅读`, 'invalid', false);
@@ -149,6 +167,7 @@ export async function fetchBookChapter(bookId: string, chapterId: string, opts: 
 export function searchSource(source: SourceId, query: string, opts: FetchOptions = {}): Promise<BookSummary[]> {
   if (source === '69shuba') return searchShuba(query, opts);
   if (source === 'ixdzs') return searchIxdzs(query, opts);
+  if (source === 'piaotia') return searchPiaotia(query, opts);
   return searchBooks(query, opts);
 }
 
@@ -182,6 +201,7 @@ const SHUBA_LINK_HOSTS = new Set(['www.69shuba.com', '69shuba.com', 'www.69shuba
 const WANSHUGE_LINK_HOSTS = new Set(['wanshuge.org', 'www.wanshuge.org']);
 /** 爱下电子书简体站与繁体镜像（书号一致） */
 const IXDZS_LINK_HOSTS = new Set(['ixdzs8.com', 'www.ixdzs8.com', 'ixdzs8.tw', 'ixdzs.tw', 'ixdzs.hk']);
+const PIAOTIA_LINK_HOSTS = new Set(['www.piaotia.com', 'piaotia.com']);
 
 /**
  * 把用户粘贴的书籍/章节网址解析为书号（只做本地解析，不发请求）：
@@ -190,6 +210,7 @@ const IXDZS_LINK_HOSTS = new Set(['ixdzs8.com', 'www.ixdzs8.com', 'ixdzs8.tw', '
  *   https://www.69shuba.com/txt/51254/123    → 69shuba-51254 + 章节 123
  *   https://wanshuge.org/book/36780/         → 36780（章节页同理）
  *   https://ixdzs8.com/read/137695/          → ixdzs-137695（p{n}.html 为章节）
+ *   https://www.piaotia.com/bookinfo/7/7906.html → piaotia-7906（/html/7/7906/{id}.html 为章节）
  */
 export function parseBookUrl(input: string): BookUrlRef | null {
   let raw = (input ?? '').trim();
@@ -219,6 +240,12 @@ export function parseBookUrl(input: string): BookUrlRef | null {
     const chapter = path.match(/^\/read\/([1-9]\d{0,8})\/p(\d{1,12})\.html$/);
     if (chapter) return { bookId: ixdzsBookId(chapter[1]!), chapterId: chapter[2]! };
     return null;
+  }
+  if (PIAOTIA_LINK_HOSTS.has(host)) {
+    const m = path.match(/^\/(?:bookinfo|html)\/(\d{1,6})\/([1-9]\d{0,8})(\.html|\/(?:index\.html)?|\/(\d{1,12})\.html)$/);
+    if (!m || Number(m[1]) !== Math.floor(Number(m[2]) / 1000)) return null;
+    if (path.startsWith('/bookinfo/') !== (m[3] === '.html')) return null;
+    return m[4] ? { bookId: piaotiaBookId(m[2]!), chapterId: m[4] } : { bookId: piaotiaBookId(m[2]!) };
   }
   if (WANSHUGE_LINK_HOSTS.has(host)) {
     const book = path.match(/^\/book\/([1-9]\d{0,8})\/?$/);
