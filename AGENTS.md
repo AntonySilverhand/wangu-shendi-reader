@@ -30,7 +30,7 @@ npm test                 # 单元测试（vi test）
 npm run typecheck        # tsc --noEmit，必须零错误
 bash tools/reader-server.sh start|stop|restart|status 8787   # 本地生产预览
 bash tools/setup-android-sdk.sh   # 一次性准备打包环境（SDK 命令行工具 + build-tools 34.0.0 + android-34，装到 ~/android-sdk，关闭 CLI 统计）
-bash android/build.sh 0.0.20   # 本地打 APK（产物 artifacts/wangu-reader-v0.0.20.apk；ANDROID_KEYSTORE 指定签名密钥）
+bash android/build.sh 0.0.21   # 本地打 APK（产物 artifacts/wangu-reader-v0.0.21.apk；ANDROID_KEYSTORE 指定签名密钥）
 git tag vX.Y.Z && git push origin vX.Y.Z   # 发布：CI（.github/workflows/release-apk.yml）构建并建 Release
 ```
 
