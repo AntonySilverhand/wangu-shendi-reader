@@ -81,10 +81,11 @@ describe('换源：来源顺序与流程', () => {
   const singleToc = (titles: string[], base: number) => ({ from: 1, to: 2, totalPages: 1, pages: [{ page: 1, entries: toc(titles, base) }], failedPages: [] });
   const chapter = (title: string, paragraphs: string[]) => ({ id: 'x', title, paragraphs, prevId: null, nextId: null, pageCount: 1, charCount: 10, complete: true, missingPages: [] });
 
-  it('万书阁的书先试飘天文学，再 69书吧；本身的书源不参与', () => {
-    expect(altOnlineSources('36780')).toEqual(['piaotia', '69shuba']);
-    expect(altOnlineSources('piaotia-7906')).toEqual(['wanshuge', '69shuba']);
-    expect(altOnlineSources('ixdzs-137695')).toEqual(['piaotia', 'wanshuge', '69shuba']);
+  it('万书阁的书先试飘天文学，再露露书、69书吧；本身的书源不参与', () => {
+    expect(altOnlineSources('36780')).toEqual(['piaotia', 'lulushu', '69shuba']);
+    expect(altOnlineSources('piaotia-7906')).toEqual(['lulushu', 'wanshuge', '69shuba']);
+    expect(altOnlineSources('lulushu-41337')).toEqual(['piaotia', 'wanshuge', '69shuba']);
+    expect(altOnlineSources('ixdzs-137695')).toEqual(['piaotia', 'lulushu', 'wanshuge', '69shuba']);
   });
 
   it('搜索 → 同名同作者的书 → 按章名找章 → 取正文；结果缓存，同章不再请求', async () => {
@@ -127,6 +128,7 @@ describe('换源：来源顺序与流程', () => {
 
   it('同名不同作者的书不用；第一个书源失败/也是占位时继续下一个', async () => {
     routes.set('/api/search?q=%E4%B8%87%E5%8F%A4%E7%A5%9E%E5%B8%9D&source=piaotia', search('piaotia', [{ id: 'piaotia-1', title: '万古神帝', author: '别人' }]));
+    routes.set('/api/search?q=%E4%B8%87%E5%8F%A4%E7%A5%9E%E5%B8%9D&source=lulushu', search('lulushu', []));
     routes.set('/api/search?q=%E4%B8%87%E5%8F%A4%E7%A5%9E%E5%B8%9D&source=69shuba', search('69shuba', [{ id: '69shuba-5', title: '万古神帝' }]));
     routes.set('/api/toc?book=69shuba-5', singleToc(['第一章 八百年后', '第三千五百五十八章 回城'], 700));
     routes.set('/api/chapter?book=69shuba-5&id=701', chapter('第三千五百五十八章 回城', ['本章节内容正在手打中，请稍后刷新']));

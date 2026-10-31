@@ -132,6 +132,30 @@ public final class SourceRulesTest {
     check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/7/7906/7906s.jpg")), true, "pt cover");
     check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/7/7906/7907s.jpg")), false, "pt cover mismatch");
     check(SourceRules.allowedCover(u("https://www.piaotia.com/files/article/image/1/7906/7906s.jpg")), false, "pt cover shard");
+    // 露露书：书页/章节页（分片校验）、POST 搜索、POST 正文接口（只能数字 + 十六进制校验码）、封面
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/41_41337/")), true, "lls book");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/41_41337/3587.html")), true, "lls chapter");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/41_41337/0.html")), true, "lls chapter 0");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/40_41337/3587.html")), false, "lls wrong shard");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/41_41337/3587_1.html")), false, "lls web page 2 not needed");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/41_41337/3587.html?x=1")), false, "lls query");
+    check(SourceRules.allowedPage(u("https://www.lulushu55.com/home/index/ajaxchapter")), false, "lls ajax via GET");
+    check(SourceRules.allowedPage(u("https://www.lulushu56.com/41_41337/")), false, "lls other numbered domain");
+    URL llsAjax = u("https://www.lulushu55.com/home/index/ajaxchapter");
+    check(SourceRules.allowedSearch(llsAjax, "id=41337&eKey=4b09fca4c6e340c9&cid=3587&basecid=3587"), true, "lls ajax");
+    check(SourceRules.allowedSearch(llsAjax, "id=41337&eKey=4b09fca4c6e340c9&cid=3587&basecid=3587&nextpage=2&pagehash=abcdef0123"), true, "lls ajax page 2");
+    check(SourceRules.allowedSearch(llsAjax, "id=41337&eKey=4b09fca4c6e340c9&cid=3587&basecid=1"), false, "lls ajax basecid mismatch");
+    check(SourceRules.allowedSearch(llsAjax, "id=41337&eKey=XYZ&cid=3587&basecid=3587"), false, "lls ajax bad key");
+    check(SourceRules.allowedSearch(llsAjax, "id=41337&eKey=4b09fca4c6e340c9&cid=3587&basecid=3587&x=1"), false, "lls ajax extra field");
+    URL llsSearch = u("https://www.lulushu55.com/home/search");
+    check(SourceRules.allowedSearch(llsSearch, "action=search&q=%E4%B8%87%E5%8F%A4%E7%A5%9E%E5%B8%9D"), true, "lls search");
+    check(SourceRules.allowedSearch(llsSearch, "action=search&q=a&x=1"), false, "lls search extra");
+    check(SourceRules.allowedSearch(llsSearch, "id=41337&eKey=4b09fca4c6e340c9&cid=1&basecid=1"), false, "lls ajax form on search path");
+    check(SourceRules.isLulushuBookId("lulushu-41337"), true, "lls id");
+    check(SourceRules.isLulushuBookId("lulushu-0"), false, "lls bad id");
+    check("https://www.lulushu55.com/uploads/41/41337.jpg".equals(SourceRules.coverUrl("lulushu-41337")), true, "lls cover url");
+    check(SourceRules.allowedCover(u("https://www.lulushu55.com/uploads/41/41337.jpg")), true, "lls cover");
+    check(SourceRules.allowedCover(u("https://www.lulushu55.com/uploads/42/41337.jpg")), false, "lls cover shard");
 
     // 字符集：Content-Type 优先，其次 meta，未知标签按 utf-8
     check("gbk".equals(SourceRules.charsetOf("text/html; charset=GBK", null)), true, "charset header");

@@ -5,7 +5,7 @@
 ## 项目是什么
 
 万书阅读器：手机优先、干净、可离线的中文小说阅读网站 + Android APK。
-书源是万书阁（wanshuge.org）、69书吧（www.69shuba.com）、飘天文学（www.piaotia.com）与爱下电子书（ixdzs8.com，整本下载型）：可在书源中搜索并阅读任意书，预置书为《万古神帝》（万书阁 book 36780）。
+书源是万书阁（wanshuge.org）、69书吧（www.69shuba.com）、飘天文学（www.piaotia.com）、露露书（www.lulushu55.com）与爱下电子书（ixdzs8.com，整本下载型）：可在书源中搜索并阅读任意书，预置书为《万古神帝》（万书阁 book 36780）。
 章节是占位文字时自动从其它书源/本机同名书换源补全（`src/web/store/alt-source.ts`）。
 前端是原生 TypeScript（无框架）+ Vite；后端是一份同构代码，本地跑 Node、线上跑 Cloudflare Worker。
 另有 Android WebView 壳（`android/`）与开发中的纯原生 App（`android-native/`，见其 AGENTS.md）。
@@ -30,14 +30,14 @@ npm test                 # 单元测试（vi test）
 npm run typecheck        # tsc --noEmit，必须零错误
 bash tools/reader-server.sh start|stop|restart|status 8787   # 本地生产预览
 bash tools/setup-android-sdk.sh   # 一次性准备打包环境（SDK 命令行工具 + build-tools 34.0.0 + android-34，装到 ~/android-sdk，关闭 CLI 统计）
-bash android/build.sh 0.0.21   # 本地打 APK（产物 artifacts/wangu-reader-v0.0.21.apk；ANDROID_KEYSTORE 指定签名密钥）
+bash android/build.sh 0.0.22   # 本地打 APK（产物 artifacts/wangu-reader-v0.0.22.apk；ANDROID_KEYSTORE 指定签名密钥）
 git tag vX.Y.Z && git push origin vX.Y.Z   # 发布：CI（.github/workflows/release-apk.yml）构建并建 Release
 ```
 
 ## 目录结构
 
 ```
-src/shared/    同构：source.ts（万书阁适配 + 上游队列/字符集/人机验证识别）、source-69shuba.ts（69书吧适配）、source-piaotia.ts（飘天文学适配）、
+src/shared/    同构：source.ts（万书阁适配 + 上游队列/字符集/人机验证识别）、source-69shuba.ts（69书吧适配）、source-piaotia.ts（飘天文学适配）、source-lulushu.ts（露露书适配）、
                source-ixdzs.ts（爱下电子书：书页/目录/搜索 + 整本 TXT 按目录切章）、zip.ts（最小 ZIP 读取/文本解码）、
                text-clean.ts（正文清洗：采集站分页提示/广告行/网址水印/HTML 残留）、
                sources.ts（按书号分派书源、封面、粘贴网址解析）、api.ts（/api 路由 + 缓存接口）
@@ -64,9 +64,9 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 4. **缓存键改动必须升版本**（如 `chapter:v2:`）。服务端磁盘缓存（`.cache/api`）与客户端 IndexedDB 都可能残留旧数据；改缓存语义时同步升 `CHAPTER_CACHE_VERSION`，并让旧记录失效后**先显示缓存再后台补全**（不可阻塞阅读）。
 5. **`complete` 语义**：只有 `ChapterResult.complete === true` 才算完整；客户端把 `undefined` 当不完整处理（触发补全）。章节内容永远"宁多勿少"——补全结果更短时不要覆盖。
 6. **Service Worker 缓存必须按构建号隔离**（`reader-shell-<build>` / `reader-runtime-<build>`），激活时清理旧版本；否则旧 JS 会持续提供，造成"修了还在复现"。
-7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛/Cloudflare 人机验证、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许由**校验过的书号/章节号**拼出的路径：万书阁的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`；69书吧的 `/book/{n}.htm`、`/book/{n}/`、`/txt/{n}/{id}`、`POST /modules/article/search.php`（表单仅 `searchkey=…&searchtype=all`）与 `static.69shuba.com` 封面；爱下电子书的书页 `/read/{n}/`、`GET /bsearch?q=` 与整本压缩包 `down7.ixdzs8.com/{n}.zip`（**章节页有 JS 安全验证，不访问、不求解**）；飘天文学的 `/bookinfo/{a}/{n}.html`、`/html/{a}/{n}/`、`/html/{a}/{n}/{id}.html`（`{a}=⌊n/1000⌋`，必须校验）、`POST /modules/article/search.php`（表单仅 `searchtype=articlename&searchkey=…`）与 `/files/article/image/{a}/{n}/{n}s.jpg` 封面。`source.ts`/`source-69shuba.ts`/`source-piaotia.ts` 与 `SourceRules.java` 保持同一白名单；原生 `UrlSafetyValidator` 目前只有万书阁（原生尚未接入 69书吧，接入时同步）。人机验证页一律报 `blocked`（不重试、不求解）。
+7. **不要做的**：任意 URL 代理、绕过登录/付费/验证码/源站会员门槛/Cloudflare 人机验证、把整本书打包进仓库、把正文缓存和个人数据（书签/进度/设置/书架）混在一起。上游只允许由**校验过的书号/章节号**拼出的路径：万书阁的目录页与章节页、`POST /search.html`（表单仅 `s=`）与 `/img/{书号}.jpg`；69书吧的 `/book/{n}.htm`、`/book/{n}/`、`/txt/{n}/{id}`、`POST /modules/article/search.php`（表单仅 `searchkey=…&searchtype=all`）与 `static.69shuba.com` 封面；爱下电子书的书页 `/read/{n}/`、`GET /bsearch?q=` 与整本压缩包 `down7.ixdzs8.com/{n}.zip`（**章节页有 JS 安全验证，不访问、不求解**）；飘天文学的 `/bookinfo/{a}/{n}.html`、`/html/{a}/{n}/`、`/html/{a}/{n}/{id}.html`（`{a}=⌊n/1000⌋`，必须校验）、`POST /modules/article/search.php`（表单仅 `searchtype=articlename&searchkey=…`）与 `/files/article/image/{a}/{n}/{n}s.jpg` 封面；露露书的 `/{a}_{n}/`、`/{a}_{n}/{id}.html`（分片必须校验）、`POST /home/search`（表单仅 `action=search&q=…`）、`POST /home/index/ajaxchapter`（表单仅 `id=&eKey=十六进制&cid=&basecid=`，cid 与 basecid 相同）与 `/uploads/{a}/{n}.jpg` 封面。`source.ts`/`source-69shuba.ts`/`source-piaotia.ts`/`source-lulushu.ts` 与 `SourceRules.java` 保持同一白名单；原生 `UrlSafetyValidator` 目前只有万书阁（原生尚未接入 69书吧，接入时同步）。人机验证页一律报 `blocked`（不重试、不求解）。
 8. **保持轻量**：不引入前端框架/网络字体；静态资源体积目标 < 150KB gzip。
-9. **书号即 bookId，书号决定书源**：万书阁书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），69书吧书为 `69shuba-{数字}`，飘天文学为 `piaotia-{数字}`，爱下电子书为 `ixdzs-{数字}`（整本下载型：`isRemoteBookId` 为假、`isLocalBookId` 为真，下载后按本地书管理，重新下载保持同一书号以保留进度），本地 TXT 书为 `local-xxx`。判定统一用 `sources.ts` 的 `sourceOfBook`/`isRemoteBookId`，不要在别处手写正则。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。新增书源：加一个适配文件 + 在 `sources.ts` 注册 + 新书号前缀，不要复用纯数字书号。
+9. **书号即 bookId，书号决定书源**：万书阁书 bookId = 源站数字书号（`/^[1-9]\d{0,8}$/`），69书吧书为 `69shuba-{数字}`，飘天文学为 `piaotia-{数字}`，露露书为 `lulushu-{数字}`，爱下电子书为 `ixdzs-{数字}`（整本下载型：`isRemoteBookId` 为假、`isLocalBookId` 为真，下载后按本地书管理，重新下载保持同一书号以保留进度），本地 TXT 书为 `local-xxx`。判定统一用 `sources.ts` 的 `sourceOfBook`/`isRemoteBookId`，不要在别处手写正则。IndexedDB、个人数据、书架都按 bookId 关联；所有书源函数显式传 bookId，不得回退到预置书（36780 只在 API 缺省 `book` 参数时作为兼容默认）。新增书源：加一个适配文件 + 在 `sources.ts` 注册 + 新书号前缀，不要复用纯数字书号。
 10. **WebView ≠ 浏览器**：新增依赖浏览器能力的功能（文件选择、下载/导出、Wake Lock、剪贴板、分享、window.open、外链）时，
     必须同时给 Android 壳接上原生实现，否则 APK 里“点了没反应”。网页侧统一走 `save-file.ts`（导出）、
     `setNativeKeepScreenOn`（常亮）、`window.__onNativeBack`（返回键）这类适配层；本机书（`isRemoteBookId` 为假）不得按自己的书号发章节网络请求（唯一例外：占位章按书名换源，见下）。
@@ -109,15 +109,22 @@ tools/         reader-server.sh、verify.sh、run-e2e.sh、make-icons.py
 - 章节 `/html/{a}/{n}/{id}.html`：`<H1>` 去掉书名链接，卷首章带卷名（“云武王城【上】 第一章 八百年后”）要截到“第N章”；正文在 `div.toplink` 之后、第一个 `</div>` 之前（中间的广告脚本表格去掉），`&nbsp;` 缩进 + `<br>`；上一章/下一章按钮指向 `index.html`/`./` 时为无。
 - 搜索 `POST /modules/article/search.php`（`searchtype=articlename&searchkey=` GBK 编码，复用 `encodeGbkComponent`），结果 `table.grid` 行（书名/最新章/作者/字数/更新/状态）；唯一结果 302 到 `http://www.piaotia.com/bookinfo/…`（注意是 http，SourceRules 两种协议都放行）。5 秒搜索闸门。
 
+## 露露书适配速查
+
+- 书号 `lulushu-{n}`，UTF-8，分片 `{a}=⌊n/1000⌋`（`/41_41337/`）。域名带序号（lulushu55），换域名时同步改 `LULUSHU.origin`、`LULUSHU_HOSTS` 与 `SourceRules.allowedLulushuOrigin`；粘贴旧序号域名的链接按同一书号解析。
+- 书页 `/{a}_{n}/`：og meta 书籍信息；目录取**最后一个** `section.mulu`（“全部章节目录”，正序；前一个是倒序的“最新章节列表”），标题带序号前缀“1.第1章 …”要去掉。章节号从 0 开始，目录号码与别站不同（“第三千五百五十八章 回城”）。
+- 章节页 `/{a}_{n}/{id}.html` 只有 `var chaptername/hash/prevcid/nextcid`，**正文不在页面里**：用页面里的 `hash` POST `/home/index/ajaxchapter`（`id={n}&eKey={hash}&cid={id}&basecid={id}`）拿 JSON `{status:'success', info:{content:'<p>…'}}`，校验码错误时 `status: 'unavailable hash'`。每章两次请求。上一章/下一章用 `prevcid/nextcid`，**不要用 `next_page`**（指向本章网页版第二页 `3587_1.html`）。正文首段是章节标题（号码可能是别站的），去掉。
+- 搜索 `POST /home/search`（`action=search&q=` UTF-8），结果 `section.fengtui dl`（h3 a 书名 / `span[itemprop=author]` / p 简介）。
+
 ## 占位章换源（alt-source.ts）
 
 - 触发：章节清洗后只剩 `EMPTY_CHAPTER_NOTE`（与“清理站点广告”开关无关，检测时总是清洗一次），且有可用来源（`hasAltSources`）。
-- 顺序：本机同名书（`reader.localbooks.v1` 书名一致，读 IndexedDB，零请求）→ 在线书源 `piaotia → wanshuge → 69shuba`（排除当前书源）。单个来源失败（网络、`blocked`、页面变化）不中断。
+- 顺序：本机同名书（`reader.localbooks.v1` 书名一致，读 IndexedDB，零请求）→ 在线书源 `piaotia → lulushu → wanshuge → 69shuba`（排除当前书源）。飘天文学请求过快会 429，露露书是它的备份。单个来源失败（网络、`blocked`、页面变化）不中断。
 - 匹配：书名一致、作者已知时一致（不取搜索结果第一条）；章节按**章名**（去掉“第N章”）匹配，同名取全书相对位置最近的一章，偏差上限 15%（短书至少 5 章），超出不认；章名为空才按号码。各站号码实测相差几十号，**不要改回按号码匹配**。万书阁目录分页：先取前 2 页拿总页数，再按相对位置取附近 5 页。
 - 书名未知（目录/书籍信息未到，标题是“书号 N”占位名）时先等（最多 15 秒），**不能拿占位名去搜索**——搜不到会被记成“没有”。
 - 结果只展示：包装成原书书号/章节号的记录、过 `viewRecord` 清洗，**不写 IndexedDB**；会话内按章缓存（再次打开不闪占位）、同书搜索/目录请求合并；预取到下一章是占位章时提前换源（本机书也会，按预取开关/省流量设置）。所有来源都明确“没有”才记为无结果，有来源出错时下次再试。
 - 别站正文首行重复章节标题（常是原书号码）时去掉。
-- 只接入正文在纯 HTML 里的站点：露露书（正文按页面 hash 解密）、无限轻小说（混淆脚本取正文）、小说王（Cloudflare 挑战）都不接入，不逆向、不求解。
+- 新书源的接入底线：不执行站点下发的脚本（无限轻小说的正文地址由混淆脚本 + 浏览器地址算出，要接只能在服务端/WebView 里跑对方的代码，不接；且为繁体）；人机验证/登录/付费一律不绕过（小说王、69书吧的 Cloudflare 挑战，QQ阅读/起点）。像露露书这样页面直接给出校验码、按普通请求就能拿到正文的可以接。
 
 ## 爱下电子书适配速查（整本下载型）
 

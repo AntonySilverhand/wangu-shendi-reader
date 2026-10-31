@@ -17,8 +17,10 @@ import java.util.regex.Pattern;
  *  - 爱下电子书（整本下载型）：书页 /read/{b}/、GET /bsearch?q=已编码关键词、
  *    整本压缩包 down7.ixdzs8.com/{b}.zip（章节页有安全验证，不访问）；
  *  - 飘天文学：/bookinfo/{a}/{b}.html、/html/{a}/{b}/（含 index.html）、/html/{a}/{b}/{id}.html（{a} = b/1000）、
- *    POST /modules/article/search.php（searchtype=articlename&searchkey=GBK 编码）、/files/article/image/{a}/{b}/{b}s.jpg。
- * 与 src/shared/source.ts、source-69shuba.ts、source-ixdzs.ts、source-piaotia.ts 保持同一白名单。
+ *    POST /modules/article/search.php（searchtype=articlename&searchkey=GBK 编码）、/files/article/image/{a}/{b}/{b}s.jpg；
+ *  - 露露书：/{a}_{b}/、/{a}_{b}/{id}.html（{a} = b/1000）、POST /home/search（action=search&q=）、
+ *    POST /home/index/ajaxchapter（id=&eKey=十六进制&cid=&basecid=，可选 nextpage/pagehash）、/uploads/{a}/{b}.jpg。
+ * 与 src/shared/source.ts、source-69shuba.ts、source-ixdzs.ts、source-piaotia.ts、source-lulushu.ts 保持同一白名单。
  */
 public final class SourceRules {
   public static final String USER_AGENT =
@@ -29,6 +31,9 @@ public final class SourceRules {
   public static final String IXDZS_PREFIX = "ixdzs-";
   public static final String IXDZS_SEARCH_PATH = "/bsearch";
   public static final String PIAOTIA_PREFIX = "piaotia-";
+  public static final String LULUSHU_PREFIX = "lulushu-";
+  public static final String LULUSHU_SEARCH_PATH = "/home/search";
+  public static final String LULUSHU_AJAX_PATH = "/home/index/ajaxchapter";
 
   private static final String BOOK = "[1-9][0-9]{0,8}";
   private static final String PAGE_PATH =
@@ -55,6 +60,13 @@ public final class SourceRules {
   private static final Pattern PIAOTIA_COVER_PATH =
       Pattern.compile("/files/article/image/([0-9]{1,6})/(" + BOOK + ")/([0-9]{1,9})s\\.jpg");
   private static final String PIAOTIA_FORM = "searchtype=articlename&searchkey=[A-Za-z0-9%._~!*'()-]{1,600}";
+  private static final Pattern LULUSHU_BOOK_ID = Pattern.compile("lulushu-(" + BOOK + ")");
+  /** group(1) = 分片 a，group(2) = 书号 b */
+  private static final Pattern LULUSHU_PAGE_PATH = Pattern.compile("/([0-9]{1,6})_(" + BOOK + ")/(?:[0-9]{1,12}\\.html)?");
+  private static final Pattern LULUSHU_COVER_PATH = Pattern.compile("/uploads/([0-9]{1,6})/(" + BOOK + ")\\.jpg");
+  private static final String LULUSHU_SEARCH_FORM = "action=search&q=[A-Za-z0-9%._~!*'()-]{1,400}";
+  private static final String LULUSHU_AJAX_FORM = "id=" + BOOK + "&eKey=[0-9a-f]{8,64}&cid=([0-9]{1,12})&basecid=([0-9]{1,12})"
+      + "(?:&nextpage=[0-9]{1,4}&pagehash=[0-9a-f]{8,64})?";
   private static final Pattern CHARSET = Pattern.compile("charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)",
       Pattern.CASE_INSENSITIVE);
   private static final Pattern META_CHARSET = Pattern.compile(
@@ -96,6 +108,21 @@ public final class SourceRules {
     return plainOrigin(url, "www.piaotia.com") || plainOrigin(url, "piaotia.com");
   }
 
+  public static boolean allowedLulushuOrigin(URL url) {
+    return plainOrigin(url, "www.lulushu55.com") || plainOrigin(url, "lulushu55.com");
+  }
+
+  /** 露露书书号（lulushu-数字） */
+  public static boolean isLulushuBookId(String id) {
+    return id != null && LULUSHU_BOOK_ID.matcher(id).matches();
+  }
+
+  private static boolean allowedLulushuPage(URL url) {
+    if (url.getQuery() != null) return false;
+    Matcher m = LULUSHU_PAGE_PATH.matcher(url.getPath());
+    return m.matches() && shardMatches(m.group(1), m.group(2));
+  }
+
   /** 飘天文学书号（piaotia-数字） */
   public static boolean isPiaotiaBookId(String id) {
     return id != null && PIAOTIA_BOOK_ID.matcher(id).matches();
@@ -123,6 +150,7 @@ public final class SourceRules {
     if (allowedShubaOrigin(url)) return url.getPath().matches(SHUBA_PAGE_PATH);
     if (allowedIxdzsOrigin(url)) return url.getQuery() == null && url.getPath().matches(IXDZS_PAGE_PATH);
     if (allowedPiaotiaOrigin(url)) return allowedPiaotiaPage(url);
+    if (allowedLulushuOrigin(url)) return allowedLulushuPage(url);
     return false;
   }
 
@@ -144,12 +172,18 @@ public final class SourceRules {
         && url.getPath().matches(IXDZS_DOWNLOAD_PATH);
   }
 
-  /** 站内搜索（只能 POST，表单只能是已编码的关键词字段） */
+  /** 站内 POST：搜索（表单只能是已编码的关键词字段）与露露书正文接口（只能是数字书号/章节号 + 十六进制校验码） */
   public static boolean allowedSearch(URL url, String form) {
     if (form == null || url.getQuery() != null) return false;
     if (allowedOrigin(url)) return SEARCH_PATH.equals(url.getPath()) && form.matches(FORM);
     if (allowedShubaOrigin(url)) return SHUBA_SEARCH_PATH.equals(url.getPath()) && form.matches(SHUBA_FORM);
     if (allowedPiaotiaOrigin(url)) return SHUBA_SEARCH_PATH.equals(url.getPath()) && form.matches(PIAOTIA_FORM);
+    if (allowedLulushuOrigin(url)) {
+      if (LULUSHU_SEARCH_PATH.equals(url.getPath())) return form.matches(LULUSHU_SEARCH_FORM);
+      if (!LULUSHU_AJAX_PATH.equals(url.getPath())) return false;
+      Matcher m = Pattern.compile(LULUSHU_AJAX_FORM).matcher(form);
+      return m.matches() && m.group(1).equals(m.group(2));
+    }
     return false;
   }
 
@@ -166,6 +200,10 @@ public final class SourceRules {
       Matcher m = PIAOTIA_COVER_PATH.matcher(url.getPath());
       return m.matches() && m.group(2).equals(m.group(3)) && shardMatches(m.group(1), m.group(2));
     }
+    if (plainOrigin(url, "www.lulushu55.com")) {
+      Matcher m = LULUSHU_COVER_PATH.matcher(url.getPath());
+      return m.matches() && shardMatches(m.group(1), m.group(2));
+    }
     return false;
   }
 
@@ -181,6 +219,10 @@ public final class SourceRules {
       String n = bookId.substring(PIAOTIA_PREFIX.length());
       return "https://www.piaotia.com/files/article/image/" + (Long.parseLong(n) / 1000)
           + "/" + n + "/" + n + "s.jpg";
+    }
+    if (isLulushuBookId(bookId)) {
+      String n = bookId.substring(LULUSHU_PREFIX.length());
+      return "https://www.lulushu55.com/uploads/" + (Long.parseLong(n) / 1000) + "/" + n + ".jpg";
     }
     return null;
   }

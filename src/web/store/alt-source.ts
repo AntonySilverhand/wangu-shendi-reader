@@ -36,8 +36,8 @@ export interface AltRequest {
   position: number | null;
 }
 
-/** 在线换源的尝试顺序：飘天文学正文完整、无验证，排第一；69书吧常有人机验证，排最后 */
-const ONLINE_PRIORITY: readonly SourceId[] = ['piaotia', 'wanshuge', '69shuba'];
+/** 在线换源的尝试顺序：飘天文学正文完整、无验证，排第一；露露书每章两次请求，其次；69书吧常有人机验证，排最后 */
+const ONLINE_PRIORITY: readonly SourceId[] = ['piaotia', 'lulushu', 'wanshuge', '69shuba'];
 /** 同名章节的相对位置最多相差这么多仍可认定为同一章（各站章节总数不同、番外位置不同） */
 const MAX_POSITION_DRIFT = 0.15;
 const MIN_INDEX_DRIFT = 5;
